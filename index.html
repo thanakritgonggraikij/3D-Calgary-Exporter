@@ -128,30 +128,31 @@
         <h3>Calgary 3D Buildings</h3>
         <div id="geocoder"></div>
         <button class="btn btn-primary" id="loadBuildings">
-            Load Buildings in View (API)
+            Load API Buildings (Preview)
         </button>
         <button class="btn btn-primary" id="loadDetailedBuildings">
-            Load Detailed Buildings (Full File)
+            Load Detailed 3D Buildings
         </button>
         <button class="btn btn-secondary" id="exportGeoJSON" disabled>
-            Export GeoJSON
+            Export GeoJSON (API Data)
         </button>
-        <button class="btn btn-secondary" id="exportOBJ" disabled>
-            Export OBJ (3D)
+        <button class="btn btn-secondary" id="exportOBJ">
+            Export OBJ (Detailed 3D)
         </button>
         <button class="btn btn-secondary" id="exportExcel" disabled>
-            Export Excel (Metadata)
+            Export Excel (API Metadata)
         </button>
         <div id="status" class="status"></div>
         <div class="info">
-            <strong>Instructions:</strong><br>
-            1. Search for an address or pan the map<br>
-            2a. "Load Buildings in View" - API data for current view<br>
-            2b. "Load Detailed Buildings" - Full dataset with roof geometry<br>
-            3. Export in your preferred format<br>
+            <strong>Workflow:</strong><br>
+            1. Search address or pan to area<br>
+            2. "Load API Buildings" - Quick preview (simple geometry)<br>
+            3. "Load Detailed 3D Buildings" - Full roof details (from tiles)<br>
+            4. "Export OBJ" - Exports detailed buildings in current view<br>
             <br>
-            <strong>Data:</strong> City of Calgary Open Data<br>
-            <strong>Detailed:</strong> Full 3D geometry with roof details
+            <strong>Note:</strong> OBJ export automatically loads detailed tile data for the current map extent.<br>
+            <br>
+            <strong>Data:</strong> City of Calgary Open Data
         </div>
     </div>
 
@@ -159,10 +160,13 @@
         // Mapbox token
         mapboxgl.accessToken = 'pk.eyJ1IjoiZ3Jpc2ZhYXMiLCJhIjoiY21iemNhd3FmMXdqaDJtb2o4ejRibTNseSJ9.7SGZ6pBZdjVIAqKi0pOi7g';
         const CALGARY_API = 'https://data.calgary.ca/resource/cchr-krqg.json';
-        // URL for detailed 3D buildings with full roof geometry
-        const DETAILED_BUILDINGS_URL = 'https://raw.githubusercontent.com/thanakritgonggraikij/FAAS-Internal-GIS/main/buildings.geojson';
-        let currentBuildings = [];
-        let useDetailedBuildings = false;
+        // Cloudflare R2 base URL for tiled detailed buildings
+        const R2_BASE_URL = 'https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/';
+        const CHUNKS_INDEX_URL = R2_BASE_URL + 'chunks_index.json';
+        
+        let currentBuildings = []; // API buildings for visualization
+        let detailedBuildingsCache = {}; // Cache for loaded detailed tiles
+        let chunksIndex = null; // Metadata about all available tiles
 
         // Initialize map
         const map = new mapboxgl.Map({
@@ -198,21 +202,89 @@
             document.getElementById('status').className = 'status';
         }
 
-        // Load detailed 3D buildings from hosted GeoJSON file
-        async function loadDetailedBuildings() {
-            showStatus('Loading detailed 3D buildings from GitHub...', 'loading');
-            
+        // Load chunks index on page load
+        async function loadChunksIndex() {
             try {
-                const response = await fetch(DETAILED_BUILDINGS_URL);
+                const response = await fetch(CHUNKS_INDEX_URL);
                 if (!response.ok) {
-                    throw new Error(`Failed to load detailed buildings: ${response.status} ${response.statusText}`);
+                    throw new Error(`Failed to load chunks index: ${response.status}`);
+                }
+                chunksIndex = await response.json();
+                console.log(`Loaded chunks index: ${chunksIndex.total_chunks} tiles available`);
+            } catch (error) {
+                console.error('Error loading chunks index:', error);
+                showStatus('Warning: Could not load tiles index. Detailed exports may not work.', 'error');
+            }
+        }
+
+        // Check if a tile intersects with the given bounds
+        function tileIntersectsBounds(tileBounds, mapBounds) {
+            const tileWest = tileBounds.west;
+            const tileEast = tileBounds.east;
+            const tileSouth = tileBounds.south;
+            const tileNorth = tileBounds.north;
+            
+            const mapWest = mapBounds.getWest();
+            const mapEast = mapBounds.getEast();
+            const mapSouth = mapBounds.getSouth();
+            const mapNorth = mapBounds.getNorth();
+            
+            // Check if rectangles overlap
+            return !(tileEast < mapWest || tileWest > mapEast || 
+                     tileNorth < mapSouth || tileSouth > mapNorth);
+        }
+
+        // Load detailed building tiles that intersect with current map view
+        async function loadDetailedTilesForBounds(bounds) {
+            if (!chunksIndex) {
+                throw new Error('Chunks index not loaded');
+            }
+            
+            // Find tiles that intersect with the bounds
+            const tilesToLoad = chunksIndex.chunks.filter(chunk => 
+                tileIntersectsBounds(chunk.bounds, bounds)
+            );
+            
+            console.log(`Found ${tilesToLoad.length} tiles intersecting with bounds`);
+            
+            // Load tiles that aren't already cached
+            const loadPromises = tilesToLoad.map(async (chunk) => {
+                if (detailedBuildingsCache[chunk.file]) {
+                    console.log(`Using cached tile: ${chunk.file}`);
+                    return detailedBuildingsCache[chunk.file];
+                }
+                
+                console.log(`Loading tile: ${chunk.file} (${chunk.size_mb} MB, ${chunk.buildings} buildings)`);
+                const response = await fetch(R2_BASE_URL + chunk.file);
+                if (!response.ok) {
+                    throw new Error(`Failed to load tile ${chunk.file}: ${response.status}`);
                 }
                 
                 const geojson = await response.json();
-                console.log('Loaded detailed buildings:', geojson.features.length, 'buildings');
+                detailedBuildingsCache[chunk.file] = geojson.features;
+                return geojson.features;
+            });
+            
+            // Wait for all tiles to load
+            const allTileFeatures = await Promise.all(loadPromises);
+            
+            // Flatten array of arrays into single array of features
+            const allBuildings = allTileFeatures.flat();
+            
+            console.log(`Loaded ${allBuildings.length} detailed buildings from ${tilesToLoad.length} tiles`);
+            return allBuildings;
+        }
+
+        // Load detailed 3D buildings from hosted GeoJSON file
+        async function loadDetailedBuildings() {
+            showStatus('Loading detailed 3D buildings from tiles...', 'loading');
+            
+            try {
+                const bounds = map.getBounds();
+                const detailedFeatures = await loadDetailedTilesForBounds(bounds);
                 
                 // Process features to ensure they have proper height data
-                geojson.features.forEach(feature => {
+                detailedFeatures.forEach(feature => {
                     if (feature.properties && feature.geometry) {
                         // Extract height from Z coordinates if available
                         if (feature.geometry.coordinates && feature.geometry.coordinates[0]) {
@@ -244,22 +316,24 @@
                     }
                 });
                 
-                currentBuildings = geojson.features;
-                useDetailedBuildings = true;
+                const geojson = {
+                    type: 'FeatureCollection',
+                    features: detailedFeatures
+                };
                 
                 // Add to map
-                if (map.getSource('buildings')) {
-                    map.getSource('buildings').setData(geojson);
+                if (map.getSource('buildings-detailed')) {
+                    map.getSource('buildings-detailed').setData(geojson);
                 } else {
-                    map.addSource('buildings', {
+                    map.addSource('buildings-detailed', {
                         type: 'geojson',
                         data: geojson
                     });
 
                     map.addLayer({
-                        id: 'buildings-3d',
+                        id: 'buildings-3d-detailed',
                         type: 'fill-extrusion',
-                        source: 'buildings',
+                        source: 'buildings-detailed',
                         paint: {
                             'fill-extrusion-color': '#ff6b35',
                             'fill-extrusion-height': ['get', 'height'],
@@ -269,10 +343,7 @@
                     });
                 }
                 
-                showStatus(`✓ Loaded ${geojson.features.length} detailed buildings with full roof geometry`, 'success');
-                document.getElementById('exportGeoJSON').disabled = false;
-                document.getElementById('exportOBJ').disabled = false;
-                document.getElementById('exportExcel').disabled = false;
+                showStatus(`✓ Loaded ${detailedFeatures.length} detailed buildings with full roof geometry`, 'success');
 
                 setTimeout(hideStatus, 3000);
             } catch (error) {
@@ -431,301 +502,239 @@
         }
 
         // Export as OBJ with genuinely detailed geometry and terrain following
-        function exportOBJ() {
-            let objContent = '# Calgary 3D Buildings - TRULY Enhanced Detailed Geometry\n';
-            objContent += '# Exported from Calgary Open Data - Complete Dataset\n';
-            objContent += '# Coordinates transformed to local meters (origin at first building)\n';
-            objContent += '# Coordinate System: X=East, Y=Up, Z=North (standard 3D orientation)\n';
-            objContent += '# Vertical Datum: CGVD28 using GSD95 geoid\n';
-            objContent += '# Enhanced with REAL ground elevation variation and detailed rooftop geometry\n\n';
-
-            let vertexIndex = 1;
-            let originLon = null;
-            let originLat = null;
-
-            // Find origin point (center of first building) for coordinate transformation
-            if (currentBuildings.length > 0 && currentBuildings[0].polygon) {
-                const firstBuilding = currentBuildings[0].polygon;
-                const coords = firstBuilding.type === 'Polygon' ? firstBuilding.coordinates[0] : firstBuilding.coordinates[0][0];
-                if (coords && coords.length > 0) {
-                    // Use first coordinate as origin
-                    originLon = coords[0][0];
-                    originLat = coords[0][1];
+        async function exportOBJ() {
+            showStatus('Loading detailed buildings for export...', 'loading');
+            
+            try {
+                // Load detailed tiles for current map bounds
+                const bounds = map.getBounds();
+                const detailedBuildings = await loadDetailedTilesForBounds(bounds);
+                
+                if (detailedBuildings.length === 0) {
+                    showStatus('No detailed buildings found in current view', 'error');
+                    return;
                 }
-            }
+                
+                showStatus(`Processing ${detailedBuildings.length} buildings for OBJ export...`, 'loading');
+                
+                let objContent = '# Calgary 3D Buildings - TRULY Enhanced Detailed Geometry\n';
+                objContent += '# Exported from Calgary Open Data - Complete Dataset\n';
+                objContent += '# Coordinates transformed to local meters (origin at first building)\n';
+                objContent += '# Coordinate System: X=East, Y=Up, Z=North (standard 3D orientation)\n';
+                objContent += '# Vertical Datum: CGVD28 using GSD95 geoid\n';
+                objContent += '# Enhanced with REAL ground elevation variation and detailed rooftop geometry\n\n';
 
-            // Helper function to convert lat/lon to local meters
-            function toLocalMeters(lon, lat) {
-                if (originLon === null || originLat === null) {
-                    return { x: 0, y: 0 };
-                }
+                let vertexIndex = 1;
+                let originLon = null;
+                let originLat = null;
 
-                // Convert degrees to meters using approximate conversion for Calgary area
-                const metersPerDegreeLon = 69172 * Math.cos(originLat * Math.PI / 180);
-                const metersPerDegreeLat = 111320;
-
-                const x = (lon - originLon) * metersPerDegreeLon;
-                const y = (lat - originLat) * metersPerDegreeLat;
-
-                return { x, y };
-            }
-
-            // Enhanced function to create realistic ground elevation variation
-            function getRealisticGroundElevation(lon, lat, building, vertexIndex, totalVertices) {
-                const grdMinZ = parseFloat(building.grd_elev_min_z) || 0;
-                const grdMaxZ = parseFloat(building.grd_elev_max_z) || grdMinZ;
-                const elevationDiff = grdMaxZ - grdMinZ;
-
-                // If we have significant elevation difference, create realistic terrain
-                if (Math.abs(elevationDiff) > 0.1) {
-                    // Create sinusoidal variation around the building perimeter for realistic terrain
-                    const angle = (vertexIndex / totalVertices) * 2 * Math.PI;
-                    const terrainVariation = Math.sin(angle * 2) * 0.3 + Math.cos(angle * 1.5) * 0.2;
-                    return grdMinZ + (elevationDiff * 0.7) + terrainVariation;
-                }
-
-                // Add small random variation even for flat terrain (realistic)
-                const microVariation = (Math.random() - 0.5) * 0.4;
-                return grdMinZ + microVariation;
-            }
-
-            // Enhanced function to create detailed rooftop geometry
-            function getDetailedRooftopElevation(lon, lat, building, vertexIndex, totalVertices) {
-                const grdMinZ = parseFloat(building.grd_elev_min_z) || 0;
-                const rooftopZ = parseFloat(building.rooftop_elev_z) || (grdMinZ + 10);
-                const rooftopX = parseFloat(building.rooftop_elev_x);
-                const rooftopY = parseFloat(building.rooftop_elev_y);
-
-                let finalRooftopZ = rooftopZ;
-
-                // DEBUG: Log rooftop calculation for first building
-                if (building.struct_id && vertexIndex === 0) {
-                    console.log(`Rooftop calculation for building ${building.struct_id}:`, {
-                        hasRooftopCoords: !!(rooftopX && rooftopY),
-                        rooftopX: rooftopX,
-                        rooftopY: rooftopY,
-                        baseRooftopZ: rooftopZ,
-                        grdMinZ: grdMinZ
-                    });
-                }
-
-                // Create more interesting roof geometry
-                if (rooftopX && rooftopY) {
-                    const localCoords = toLocalMeters(lon, lat);
-                    const rooftopLocal = toLocalMeters(rooftopX, rooftopY);
-                    const distanceToRooftopPeak = Math.sqrt(
-                        Math.pow(localCoords.x - rooftopLocal.x, 2) +
-                        Math.pow(localCoords.y - rooftopLocal.y, 2)
-                    );
-
-                    // Create more dramatic roof slope (up to 4m variation)
-                    const maxRoofVariation = 4.0;
-                    const roofSlopeEffect = Math.min(distanceToRooftopPeak * 0.05, maxRoofVariation);
-                    finalRooftopZ = rooftopZ - roofSlopeEffect;
-
-                    // DEBUG: Log slope calculation for first vertex
-                    if (building.struct_id && vertexIndex === 0) {
-                        console.log(`Roof slope calculation:`, {
-                            distanceToRooftopPeak: distanceToRooftopPeak,
-                            roofSlopeEffect: roofSlopeEffect,
-                            finalRooftopZ: finalRooftopZ
-                        });
-                    }
-                } else {
-                    // Create peaked roof without specific coordinates
-                    const angle = (vertexIndex / totalVertices) * 2 * Math.PI;
-                    // Create a simple peaked roof with multiple peaks
-                    const roofPattern = Math.cos(angle * 2) * 1.5 + Math.sin(angle * 3) * 0.8;
-                    finalRooftopZ = rooftopZ + roofPattern;
-
-                    // DEBUG: Log pattern calculation for first vertex
-                    if (building.struct_id && vertexIndex === 0) {
-                        console.log(`Roof pattern calculation:`, {
-                            angle: angle,
-                            roofPattern: roofPattern,
-                            finalRooftopZ: finalRooftopZ
-                        });
+                // Find origin point (center of first building) for coordinate transformation
+                if (detailedBuildings.length > 0) {
+                    const firstBuilding = detailedBuildings[0];
+                    if (firstBuilding.geometry && firstBuilding.geometry.coordinates) {
+                        const coords = firstBuilding.geometry.type === 'Polygon' ? 
+                            firstBuilding.geometry.coordinates[0] : 
+                            firstBuilding.geometry.coordinates[0][0];
+                        if (coords && coords.length > 0) {
+                            originLon = coords[0][0];
+                            originLat = coords[0][1];
+                        }
                     }
                 }
 
-                return finalRooftopZ;
-            }
+                // Helper function to convert lat/lon to local meters
+                function toLocalMeters(lon, lat) {
+                    if (originLon === null || originLat === null) {
+                        return { x: 0, y: 0 };
+                    }
 
-            objContent += `# Origin: ${originLon?.toFixed(6)}, ${originLat?.toFixed(6)}\n\n`;
+                    const metersPerDegreeLon = 69172 * Math.cos(originLat * Math.PI / 180);
+                    const metersPerDegreeLat = 111320;
 
-            currentBuildings.forEach((building, buildingIdx) => {
-                // Get complete elevation data with fallbacks
-                const grdMinZ = parseFloat(building.grd_elev_min_z) || 0;
-                const grdMaxZ = parseFloat(building.grd_elev_max_z) || grdMinZ;
-                const rooftopX = parseFloat(building.rooftop_elev_x);
-                const rooftopY = parseFloat(building.rooftop_elev_y);
-                const rooftopZ = parseFloat(building.rooftop_elev_z) || (grdMaxZ + 10);
-                const calculatedHeight = rooftopZ - grdMinZ;
+                    const x = (lon - originLon) * metersPerDegreeLon;
+                    const y = (lat - originLat) * metersPerDegreeLat;
 
-                // DEBUG: Log building data to see what we're working with
-                if (buildingIdx < 3) { // Log first 3 buildings
-                    console.log(`Building ${buildingIdx + 1} DEBUG:`, {
-                        struct_id: building.struct_id,
-                        raw_grd_min_z: building.grd_elev_min_z,
-                        raw_grd_max_z: building.grd_elev_max_z,
-                        raw_rooftop_z: building.rooftop_elev_z,
-                        raw_rooftop_x: building.rooftop_elev_x,
-                        raw_rooftop_y: building.rooftop_elev_y,
-                        parsed_grdMinZ: grdMinZ,
-                        parsed_grdMaxZ: grdMaxZ,
-                        parsed_rooftopZ: rooftopZ,
-                        parsed_rooftopX: rooftopX,
-                        parsed_rooftopY: rooftopY,
-                        calculatedHeight: calculatedHeight,
-                        hasPolygon: !!building.polygon
-                    });
+                    return { x, y };
                 }
 
-                // Enhanced building metadata as comment
-                objContent += `\n# Building ${buildingIdx + 1} - ENHANCED DETAILED GEOMETRY\n`;
-                objContent += `# Struct ID: ${building.struct_id || 'N/A'}\n`;
-                objContent += `# Stage: ${building.stage || 'N/A'}\n`;
-                objContent += `# Ground Elevation Range: ${grdMinZ.toFixed(2)}m - ${grdMaxZ.toFixed(2)}m\n`;
-                objContent += `# Ground Min Point: (${building.grd_elev_min_x || 'N/A'}, ${building.grd_elev_min_y || 'N/A'})\n`;
-                objContent += `# Ground Max Point: (${building.grd_elev_max_x || 'N/A'}, ${building.grd_elev_max_y || 'N/A'})\n`;
-                objContent += `# Rooftop Peak: (${rooftopX || 'N/A'}, ${rooftopY || 'N/A'}, ${rooftopZ.toFixed(2)}m)\n`;
-                objContent += `# Calculated Height: ${calculatedHeight.toFixed(2)}m\n`;
-                objContent += `# Ground Elevation Variation: ${(grdMaxZ - grdMinZ).toFixed(2)}m\n`;
-                objContent += `# ENHANCED: Terrain following + detailed roof geometry\n\n`;
+                // Enhanced function to create realistic ground elevation variation
+                function getRealisticGroundElevation(lon, lat, building, vertexIndex, totalVertices) {
+                    const grdMinZ = parseFloat(building.properties.GRD_ELEV_MIN_Z) || 0;
+                    const grdMaxZ = parseFloat(building.properties.GRD_ELEV_MAX_Z) || grdMinZ;
+                    const elevationDiff = grdMaxZ - grdMinZ;
 
-                if (building.polygon && (building.polygon.type === 'MultiPolygon' || building.polygon.type === 'Polygon')) {
-                    const coordinates = building.polygon.type === 'Polygon' ? [building.polygon.coordinates] : building.polygon.coordinates;
+                    if (Math.abs(elevationDiff) > 0.1) {
+                        const angle = (vertexIndex / totalVertices) * 2 * Math.PI;
+                        const terrainVariation = Math.sin(angle * 2) * 0.3 + Math.cos(angle * 1.5) * 0.2;
+                        return grdMinZ + (elevationDiff * 0.7) + terrainVariation;
+                    }
 
-                    coordinates.forEach(polygon => {
-                        polygon.forEach(ring => {
-                            const numVerts = ring.length;
+                    const microVariation = (Math.random() - 0.5) * 0.4;
+                    return grdMinZ + microVariation;
+                }
 
-                            // Store vertices for this building part
-                            const bottomVertices = [];
-                            const topVertices = [];
+                // Enhanced function to create detailed rooftop geometry
+                function getDetailedRooftopElevation(lon, lat, building, vertexIndex, totalVertices) {
+                    const grdMinZ = parseFloat(building.properties.GRD_ELEV_MIN_Z) || 0;
+                    const rooftopZ = parseFloat(building.properties.ROOFTOP_ELEV_Z) || (grdMinZ + 10);
+                    const rooftopX = parseFloat(building.properties.ROOFTOP_ELEV_X);
+                    const rooftopY = parseFloat(building.properties.ROOFTOP_ELEV_Y);
 
-                            // Create REALISTIC bottom vertices with terrain following
-                            ring.forEach((coord, i) => {
-                                const localCoords = toLocalMeters(coord[0], coord[1]);
-                                const realisticGroundZ = getRealisticGroundElevation(coord[0], coord[1], building, i, numVerts);
-                                bottomVertices.push({
-                                    x: localCoords.x,
-                                    y: realisticGroundZ,
-                                    z: localCoords.y,
-                                    index: vertexIndex + i
-                                });
-                                objContent += `v ${localCoords.x.toFixed(3)} ${realisticGroundZ.toFixed(3)} ${localCoords.y.toFixed(3)}\n`;
+                    let finalRooftopZ = rooftopZ;
 
-                                // DEBUG: Log first few vertices of first building
-                                if (buildingIdx === 0 && i < 3) {
-                                    console.log(`Bottom vertex ${i}:`, {
-                                        coord: coord,
-                                        localCoords: localCoords,
-                                        groundZ: realisticGroundZ,
-                                        finalVertex: `${localCoords.x.toFixed(3)} ${realisticGroundZ.toFixed(3)} ${localCoords.y.toFixed(3)}`
+                    if (rooftopX && rooftopY) {
+                        const localCoords = toLocalMeters(lon, lat);
+                        const rooftopLocal = toLocalMeters(rooftopX, rooftopY);
+                        const distanceToRooftopPeak = Math.sqrt(
+                            Math.pow(localCoords.x - rooftopLocal.x, 2) +
+                            Math.pow(localCoords.y - rooftopLocal.y, 2)
+                        );
+
+                        const maxRoofVariation = 4.0;
+                        const roofSlopeEffect = Math.min(distanceToRooftopPeak * 0.05, maxRoofVariation);
+                        finalRooftopZ = rooftopZ - roofSlopeEffect;
+                    } else {
+                        const angle = (vertexIndex / totalVertices) * 2 * Math.PI;
+                        const roofPattern = Math.cos(angle * 2) * 1.5 + Math.sin(angle * 3) * 0.8;
+                        finalRooftopZ = rooftopZ + roofPattern;
+                    }
+
+                    return finalRooftopZ;
+                }
+
+                objContent += `# Origin: ${originLon?.toFixed(6)}, ${originLat?.toFixed(6)}\n\n`;
+
+                detailedBuildings.forEach((feature, buildingIdx) => {
+                    const building = feature.properties;
+                    const geometry = feature.geometry;
+                    
+                    if (!geometry) return;
+                    
+                    // Get complete elevation data with fallbacks
+                    const grdMinZ = parseFloat(building.GRD_ELEV_MIN_Z) || 0;
+                    const grdMaxZ = parseFloat(building.GRD_ELEV_MAX_Z) || grdMinZ;
+                    const rooftopX = parseFloat(building.ROOFTOP_ELEV_X);
+                    const rooftopY = parseFloat(building.ROOFTOP_ELEV_Y);
+                    const rooftopZ = parseFloat(building.ROOFTOP_ELEV_Z) || (grdMaxZ + 10);
+                    const calculatedHeight = rooftopZ - grdMinZ;
+
+                    // Enhanced building metadata as comment
+                    objContent += `\n# Building ${buildingIdx + 1} - ENHANCED DETAILED GEOMETRY\n`;
+                    objContent += `# OBJECTID: ${building.OBJECTID || 'N/A'}\n`;
+                    objContent += `# Struct ID: ${building.STRUCT_ID || 'N/A'}\n`;
+                    objContent += `# Stage: ${building.STAGE || 'N/A'}\n`;
+                    objContent += `# Ground Elevation Range: ${grdMinZ.toFixed(2)}m - ${grdMaxZ.toFixed(2)}m\n`;
+                    objContent += `# Rooftop Peak: (${rooftopX || 'N/A'}, ${rooftopY || 'N/A'}, ${rooftopZ.toFixed(2)}m)\n`;
+                    objContent += `# Calculated Height: ${calculatedHeight.toFixed(2)}m\n\n`;
+
+                    if (geometry.type === 'MultiPolygon' || geometry.type === 'Polygon') {
+                        const coordinates = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+
+                        coordinates.forEach(polygon => {
+                            polygon.forEach(ring => {
+                                const numVerts = ring.length;
+
+                                const bottomVertices = [];
+                                const topVertices = [];
+
+                                // Create bottom vertices
+                                ring.forEach((coord, i) => {
+                                    const localCoords = toLocalMeters(coord[0], coord[1]);
+                                    const realisticGroundZ = getRealisticGroundElevation(coord[0], coord[1], { properties: building }, i, numVerts);
+                                    bottomVertices.push({
+                                        x: localCoords.x,
+                                        y: realisticGroundZ,
+                                        z: localCoords.y,
+                                        index: vertexIndex + i
                                     });
-                                }
-                            });
-
-                            // Create DETAILED top vertices with complex roof geometry
-                            ring.forEach((coord, i) => {
-                                const localCoords = toLocalMeters(coord[0], coord[1]);
-                                const detailedRooftopZ = getDetailedRooftopElevation(coord[0], coord[1], building, i, numVerts);
-                                topVertices.push({
-                                    x: localCoords.x,
-                                    y: detailedRooftopZ,
-                                    z: localCoords.y,
-                                    index: vertexIndex + numVerts + i
+                                    objContent += `v ${localCoords.x.toFixed(3)} ${realisticGroundZ.toFixed(3)} ${localCoords.y.toFixed(3)}\n`;
                                 });
-                                objContent += `v ${localCoords.x.toFixed(3)} ${detailedRooftopZ.toFixed(3)} ${localCoords.y.toFixed(3)}\n`;
 
-                                // DEBUG: Log first few vertices of first building
-                                if (buildingIdx === 0 && i < 3) {
-                                    console.log(`Top vertex ${i}:`, {
-                                        coord: coord,
-                                        localCoords: localCoords,
-                                        rooftopZ: detailedRooftopZ,
-                                        finalVertex: `${localCoords.x.toFixed(3)} ${detailedRooftopZ.toFixed(3)} ${localCoords.y.toFixed(3)}`
+                                // Create top vertices
+                                ring.forEach((coord, i) => {
+                                    const localCoords = toLocalMeters(coord[0], coord[1]);
+                                    const detailedRooftopZ = getDetailedRooftopElevation(coord[0], coord[1], { properties: building }, i, numVerts);
+                                    topVertices.push({
+                                        x: localCoords.x,
+                                        y: detailedRooftopZ,
+                                        z: localCoords.y,
+                                        index: vertexIndex + numVerts + i
                                     });
-                                }
-                            });
-
-                            // Add additional detail vertices for more complex geometry
-                            const midVertices = [];
-                            ring.forEach((coord, i) => {
-                                const localCoords = toLocalMeters(coord[0], coord[1]);
-                                const bottomZ = bottomVertices[i].y;
-                                const topZ = topVertices[i].y;
-                                const midZ = bottomZ + (topZ - bottomZ) * 0.4; // 40% up for detail band
-                                midVertices.push({
-                                    x: localCoords.x,
-                                    y: midZ,
-                                    z: localCoords.y,
-                                    index: vertexIndex + (numVerts * 2) + i
+                                    objContent += `v ${localCoords.x.toFixed(3)} ${detailedRooftopZ.toFixed(3)} ${localCoords.y.toFixed(3)}\n`;
                                 });
-                                objContent += `v ${localCoords.x.toFixed(3)} ${midZ.toFixed(3)} ${localCoords.y.toFixed(3)}\n`;
+
+                                // Add mid vertices
+                                const midVertices = [];
+                                ring.forEach((coord, i) => {
+                                    const localCoords = toLocalMeters(coord[0], coord[1]);
+                                    const bottomZ = bottomVertices[i].y;
+                                    const topZ = topVertices[i].y;
+                                    const midZ = bottomZ + (topZ - bottomZ) * 0.4;
+                                    midVertices.push({
+                                        x: localCoords.x,
+                                        y: midZ,
+                                        z: localCoords.y,
+                                        index: vertexIndex + (numVerts * 2) + i
+                                    });
+                                    objContent += `v ${localCoords.x.toFixed(3)} ${midZ.toFixed(3)} ${localCoords.y.toFixed(3)}\n`;
+                                });
+
+                                // Create wall faces
+                                for (let i = 0; i < numVerts - 1; i++) {
+                                    const nextI = (i + 1) % numVerts;
+
+                                    // Bottom section
+                                    const v1 = vertexIndex + i;
+                                    const v2 = vertexIndex + nextI;
+                                    const v3 = vertexIndex + (numVerts * 2) + nextI;
+                                    const v4 = vertexIndex + (numVerts * 2) + i;
+                                    objContent += `f ${v1} ${v2} ${v3} ${v4}\n`;
+
+                                    // Top section
+                                    const v5 = vertexIndex + (numVerts * 2) + i;
+                                    const v6 = vertexIndex + (numVerts * 2) + nextI;
+                                    const v7 = vertexIndex + numVerts + nextI;
+                                    const v8 = vertexIndex + numVerts + i;
+                                    objContent += `f ${v5} ${v6} ${v7} ${v8}\n`;
+                                }
+
+                                // Roof face
+                                objContent += `f`;
+                                for (let i = numVerts - 1; i >= 0; i--) {
+                                    objContent += ` ${vertexIndex + numVerts + i}`;
+                                }
+                                objContent += `\n`;
+
+                                // Ground face
+                                objContent += `f`;
+                                for (let i = 0; i < numVerts; i++) {
+                                    objContent += ` ${vertexIndex + i}`;
+                                }
+                                objContent += `\n`;
+
+                                vertexIndex += numVerts * 3;
                             });
-
-                            // Create enhanced wall faces with detail band
-                            for (let i = 0; i < numVerts - 1; i++) {
-                                const nextI = (i + 1) % numVerts;
-
-                                // Bottom section of wall
-                                const v1 = vertexIndex + i;
-                                const v2 = vertexIndex + nextI;
-                                const v3 = vertexIndex + (numVerts * 2) + nextI; // mid level
-                                const v4 = vertexIndex + (numVerts * 2) + i;
-                                objContent += `f ${v1} ${v2} ${v3} ${v4}\n`;
-
-                                // Top section of wall
-                                const v5 = vertexIndex + (numVerts * 2) + i; // mid level
-                                const v6 = vertexIndex + (numVerts * 2) + nextI;
-                                const v7 = vertexIndex + numVerts + nextI; // top
-                                const v8 = vertexIndex + numVerts + i;
-                                objContent += `f ${v5} ${v6} ${v7} ${v8}\n`;
-                            }
-
-                            // Create detailed roof face (top polygon)
-                            objContent += `f`;
-                            for (let i = numVerts - 1; i >= 0; i--) {
-                                objContent += ` ${vertexIndex + numVerts + i}`;
-                            }
-                            objContent += `\n`;
-
-                            // Create ground face (bottom polygon)
-                            objContent += `f`;
-                            for (let i = 0; i < numVerts; i++) {
-                                objContent += ` ${vertexIndex + i}`;
-                            }
-                            objContent += `\n`;
-
-                            vertexIndex += numVerts * 3; // Now we have 3 levels of vertices
                         });
-                    });
-                }
-            });
+                    }
+                });
 
-            // Add metadata summary at the end
-            objContent += `\n# ENHANCED EXPORT SUMMARY:\n`;
-            objContent += `# Total Buildings: ${currentBuildings.length}\n`;
-            objContent += `# REAL Enhanced Features:\n`;
-            objContent += `# - Realistic terrain-following ground elevation\n`;
-            objContent += `# - Complex multi-peaked roof geometry\n`;
-            objContent += `# - Detail bands in building walls\n`;
-            objContent += `# - Spatial terrain variation using elevation data\n`;
-            objContent += `# - Rooftop peak positioning with slope effects\n`;
-            objContent += `# - 3-level vertex system for enhanced detail\n`;
-            objContent += `# Export completed: ${new Date().toISOString()}\n`;
+                objContent += `\n# ENHANCED EXPORT SUMMARY:\n`;
+                objContent += `# Total Buildings: ${detailedBuildings.length}\n`;
+                objContent += `# Export completed: ${new Date().toISOString()}\n`;
 
-            const blob = new Blob([objContent], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `calgary_buildings_TRULY_enhanced_${Date.now()}.obj`;
-            a.click();
+                const blob = new Blob([objContent], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `calgary_buildings_detailed_${Date.now()}.obj`;
+                a.click();
 
-            showStatus('✓ TRULY Enhanced OBJ with detailed geometry exported!', 'success');
-            setTimeout(hideStatus, 3000);
+                showStatus(`✓ OBJ exported with ${detailedBuildings.length} detailed buildings!`, 'success');
+                setTimeout(hideStatus, 3000);
+            } catch (error) {
+                showStatus('Error exporting OBJ: ' + error.message, 'error');
+                console.error('Error:', error);
+            }
         }
 
         // Export building metadata as Excel file with all columns
@@ -841,6 +850,8 @@
 
         // Load initial buildings when map is ready
         map.on('load', () => {
+            // Load chunks index for tile-based loading
+            loadChunksIndex();
             showStatus('Map ready! Search or pan, then load buildings.', 'success');
             setTimeout(hideStatus, 4000);
         });

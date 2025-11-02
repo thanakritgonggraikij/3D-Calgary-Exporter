@@ -1,0 +1,700 @@
+{
+  "total_chunks": 63,
+  "total_buildings": 457474,
+  "cell_size_degrees": 0.05,
+  "chunks": [
+    {
+      "file": "tile_-2282_1023.geojson",
+      "buildings": 12482,
+      "size_mb": 116.15,
+      "bounds": {
+        "west": -114.1002697,
+        "east": -114.0498606,
+        "south": 51.149843,
+        "north": 51.1989523
+      }
+    },
+    {
+      "file": "tile_-2280_1022.geojson",
+      "buildings": 9420,
+      "size_mb": 54.48,
+      "bounds": {
+        "west": -114.0000595,
+        "east": -113.9495102,
+        "south": 51.099919,
+        "north": 51.149994
+      }
+    },
+    {
+      "file": "tile_-2280_1019.geojson",
+      "buildings": 1786,
+      "size_mb": 9.4,
+      "bounds": {
+        "west": -114.0009241,
+        "east": -113.9470667,
+        "south": 50.9497859,
+        "north": 51.0004229
+      }
+    },
+    {
+      "file": "tile_-2280_1021.geojson",
+      "buildings": 18713,
+      "size_mb": 82.15,
+      "bounds": {
+        "west": -114.0009919,
+        "east": -113.9497816,
+        "south": 51.0495537,
+        "north": 51.1001134
+      }
+    },
+    {
+      "file": "tile_-2282_1021.geojson",
+      "buildings": 24457,
+      "size_mb": 130.19,
+      "bounds": {
+        "west": -114.1035406,
+        "east": -114.0485378,
+        "south": 51.0494098,
+        "north": 51.1001593
+      }
+    },
+    {
+      "file": "tile_-2281_1017.geojson",
+      "buildings": 9448,
+      "size_mb": 90.79,
+      "bounds": {
+        "west": -114.0502051,
+        "east": -113.9996411,
+        "south": 50.8500262,
+        "north": 50.9001857
+      }
+    },
+    {
+      "file": "tile_-2283_1021.geojson",
+      "buildings": 18279,
+      "size_mb": 93.78,
+      "bounds": {
+        "west": -114.1502933,
+        "east": -114.0998041,
+        "south": 51.0498471,
+        "north": 51.1007605
+      }
+    },
+    {
+      "file": "tile_-2283_1018.geojson",
+      "buildings": 13237,
+      "size_mb": 115.55,
+      "bounds": {
+        "west": -114.1503101,
+        "east": -114.0997618,
+        "south": 50.899873,
+        "north": 50.9502092
+      }
+    },
+    {
+      "file": "tile_-2280_1018.geojson",
+      "buildings": 15936,
+      "size_mb": 154.06,
+      "bounds": {
+        "west": -114.0002348,
+        "east": -113.9498136,
+        "south": 50.8998276,
+        "north": 50.9502613
+      }
+    },
+    {
+      "file": "tile_-2280_1017.geojson",
+      "buildings": 10840,
+      "size_mb": 104.19,
+      "bounds": {
+        "west": -114.000187,
+        "east": -113.9495833,
+        "south": 50.8512577,
+        "north": 50.9001424
+      }
+    },
+    {
+      "file": "tile_-2279_1018.geojson",
+      "buildings": 8681,
+      "size_mb": 66.9,
+      "bounds": {
+        "west": -113.9502574,
+        "east": -113.9004572,
+        "south": 50.8998786,
+        "north": 50.9496847
+      }
+    },
+    {
+      "file": "tile_-2280_1020.geojson",
+      "buildings": 16637,
+      "size_mb": 67.37,
+      "bounds": {
+        "west": -114.0004078,
+        "east": -113.9494027,
+        "south": 50.999187,
+        "north": 51.0505178
+      }
+    },
+    {
+      "file": "tile_-2285_1022.geojson",
+      "buildings": 14437,
+      "size_mb": 140.0,
+      "bounds": {
+        "west": -114.2508249,
+        "east": -114.1997179,
+        "south": 51.1000486,
+        "north": 51.1503645
+      }
+    },
+    {
+      "file": "tile_-2286_1022.geojson",
+      "buildings": 3174,
+      "size_mb": 35.65,
+      "bounds": {
+        "west": -114.2998412,
+        "east": -114.2496909,
+        "south": 51.0998607,
+        "north": 51.1501167
+      }
+    },
+    {
+      "file": "tile_-2281_1023.geojson",
+      "buildings": 3819,
+      "size_mb": 28.85,
+      "bounds": {
+        "west": -114.0500833,
+        "east": -113.9998588,
+        "south": 51.1470385,
+        "north": 51.1917677
+      }
+    },
+    {
+      "file": "tile_-2279_1017.geojson",
+      "buildings": 3702,
+      "size_mb": 32.79,
+      "bounds": {
+        "west": -113.9506355,
+        "east": -113.9046076,
+        "south": 50.8520017,
+        "north": 50.9001542
+      }
+    },
+    {
+      "file": "tile_-2280_1023.geojson",
+      "buildings": 4407,
+      "size_mb": 34.4,
+      "bounds": {
+        "west": -114.0008905,
+        "east": -113.9486283,
+        "south": 51.1499078,
+        "north": 51.1948635
+      }
+    },
+    {
+      "file": "tile_-2283_1020.geojson",
+      "buildings": 22223,
+      "size_mb": 119.99,
+      "bounds": {
+        "west": -114.1504108,
+        "east": -114.0989453,
+        "south": 50.9998766,
+        "north": 51.0500778
+      }
+    },
+    {
+      "file": "tile_-2279_1023.geojson",
+      "buildings": 1768,
+      "size_mb": 12.02,
+      "bounds": {
+        "west": -113.9502318,
+        "east": -113.9125263,
+        "south": 51.1502347,
+        "north": 51.180834
+      }
+    },
+    {
+      "file": "tile_-2284_1023.geojson",
+      "buildings": 3972,
+      "size_mb": 41.65,
+      "bounds": {
+        "west": -114.2007214,
+        "east": -114.1497996,
+        "south": 51.1498404,
+        "north": 51.1976525
+      }
+    },
+    {
+      "file": "tile_-2283_1019.geojson",
+      "buildings": 10745,
+      "size_mb": 63.56,
+      "bounds": {
+        "west": -114.1453239,
+        "east": -114.0997796,
+        "south": 50.9499251,
+        "north": 51.0001198
+      }
+    },
+    {
+      "file": "tile_-2281_1021.geojson",
+      "buildings": 9292,
+      "size_mb": 46.3,
+      "bounds": {
+        "west": -114.05072,
+        "east": -113.9987212,
+        "south": 51.0494407,
+        "north": 51.101598
+      }
+    },
+    {
+      "file": "tile_-2281_1018.geojson",
+      "buildings": 15097,
+      "size_mb": 89.93,
+      "bounds": {
+        "west": -114.0501753,
+        "east": -113.9996319,
+        "south": 50.8998556,
+        "north": 50.9503315
+      }
+    },
+    {
+      "file": "tile_-2284_1021.geojson",
+      "buildings": 13047,
+      "size_mb": 93.41,
+      "bounds": {
+        "west": -114.2004159,
+        "east": -114.1494942,
+        "south": 51.0498409,
+        "north": 51.1001492
+      }
+    },
+    {
+      "file": "tile_-2279_1021.geojson",
+      "buildings": 15959,
+      "size_mb": 79.71,
+      "bounds": {
+        "west": -113.9501823,
+        "east": -113.9107734,
+        "south": 51.0498524,
+        "north": 51.1001078
+      }
+    },
+    {
+      "file": "tile_-2283_1023.geojson",
+      "buildings": 10756,
+      "size_mb": 100.4,
+      "bounds": {
+        "west": -114.150169,
+        "east": -114.0997047,
+        "south": 51.1498446,
+        "north": 51.197519
+      }
+    },
+    {
+      "file": "tile_-2281_1022.geojson",
+      "buildings": 778,
+      "size_mb": 9.18,
+      "bounds": {
+        "west": -114.0503314,
+        "east": -113.9974542,
+        "south": 51.0986934,
+        "north": 51.1507823
+      }
+    },
+    {
+      "file": "tile_-2281_1019.geojson",
+      "buildings": 12688,
+      "size_mb": 76.13,
+      "bounds": {
+        "west": -114.0508088,
+        "east": -113.9995274,
+        "south": 50.949858,
+        "north": 51.0013557
+      }
+    },
+    {
+      "file": "tile_-2285_1020.geojson",
+      "buildings": 4187,
+      "size_mb": 55.96,
+      "bounds": {
+        "west": -114.2336382,
+        "east": -114.1998609,
+        "south": 51.0093034,
+        "north": 51.0501487
+      }
+    },
+    {
+      "file": "tile_-2284_1022.geojson",
+      "buildings": 18503,
+      "size_mb": 153.13,
+      "bounds": {
+        "west": -114.2012395,
+        "east": -114.1496581,
+        "south": 51.0998592,
+        "north": 51.1501376
+      }
+    },
+    {
+      "file": "tile_-2279_1022.geojson",
+      "buildings": 12776,
+      "size_mb": 85.8,
+      "bounds": {
+        "west": -113.9503456,
+        "east": -113.912547,
+        "south": 51.0999142,
+        "north": 51.1500259
+      }
+    },
+    {
+      "file": "tile_-2286_1021.geojson",
+      "buildings": 1922,
+      "size_mb": 22.51,
+      "bounds": {
+        "west": -114.2921597,
+        "east": -114.2498276,
+        "south": 51.0812248,
+        "north": 51.1001339
+      }
+    },
+    {
+      "file": "tile_-2281_1020.geojson",
+      "buildings": 4653,
+      "size_mb": 28.19,
+      "bounds": {
+        "west": -114.0507209,
+        "east": -113.9996492,
+        "south": 50.9996854,
+        "north": 51.0503176
+      }
+    },
+    {
+      "file": "tile_-2285_1021.geojson",
+      "buildings": 7595,
+      "size_mb": 66.7,
+      "bounds": {
+        "west": -114.2500288,
+        "east": -114.1995519,
+        "south": 51.0497697,
+        "north": 51.1000452
+      }
+    },
+    {
+      "file": "tile_-2282_1019.geojson",
+      "buildings": 18188,
+      "size_mb": 91.93,
+      "bounds": {
+        "west": -114.1001945,
+        "east": -114.0492653,
+        "south": 50.9498769,
+        "north": 51.0012515
+      }
+    },
+    {
+      "file": "tile_-2282_1018.geojson",
+      "buildings": 15782,
+      "size_mb": 121.95,
+      "bounds": {
+        "west": -114.1003294,
+        "east": -114.0497661,
+        "south": 50.8996822,
+        "north": 50.9501369
+      }
+    },
+    {
+      "file": "tile_-2282_1017.geojson",
+      "buildings": 4919,
+      "size_mb": 44.77,
+      "bounds": {
+        "west": -114.1002053,
+        "east": -114.0497552,
+        "south": 50.8499026,
+        "north": 50.9001799
+      }
+    },
+    {
+      "file": "tile_-2278_1019.geojson",
+      "buildings": 107,
+      "size_mb": 0.68,
+      "bounds": {
+        "west": -113.8998295,
+        "east": -113.8660294,
+        "south": 50.9503837,
+        "north": 50.9722538
+      }
+    },
+    {
+      "file": "tile_-2279_1019.geojson",
+      "buildings": 550,
+      "size_mb": 2.57,
+      "bounds": {
+        "west": -113.9516416,
+        "east": -113.8992748,
+        "south": 50.9498973,
+        "north": 51.000009
+      }
+    },
+    {
+      "file": "tile_-2282_1022.geojson",
+      "buildings": 18506,
+      "size_mb": 101.07,
+      "bounds": {
+        "west": -114.1002235,
+        "east": -114.0486845,
+        "south": 51.0995268,
+        "north": 51.1501715
+      }
+    },
+    {
+      "file": "tile_-2282_1020.geojson",
+      "buildings": 12060,
+      "size_mb": 106.06,
+      "bounds": {
+        "west": -114.1003437,
+        "east": -114.0492479,
+        "south": 50.9991074,
+        "north": 51.0503726
+      }
+    },
+    {
+      "file": "tile_-2283_1022.geojson",
+      "buildings": 10963,
+      "size_mb": 99.64,
+      "bounds": {
+        "west": -114.1506529,
+        "east": -114.0997154,
+        "south": 51.0998096,
+        "north": 51.150142
+      }
+    },
+    {
+      "file": "tile_-2279_1020.geojson",
+      "buildings": 3845,
+      "size_mb": 20.81,
+      "bounds": {
+        "west": -113.9506584,
+        "east": -113.9007513,
+        "south": 50.9999859,
+        "north": 51.0501119
+      }
+    },
+    {
+      "file": "tile_-2284_1020.geojson",
+      "buildings": 13288,
+      "size_mb": 124.1,
+      "bounds": {
+        "west": -114.2002181,
+        "east": -114.1495508,
+        "south": 51.0061619,
+        "north": 51.0501499
+      }
+    },
+    {
+      "file": "tile_-2283_1017.geojson",
+      "buildings": 1610,
+      "size_mb": 12.52,
+      "bounds": {
+        "west": -114.1424497,
+        "east": -114.0997836,
+        "south": 50.8855662,
+        "north": 50.90036
+      }
+    },
+    {
+      "file": "tile_-2285_1023.geojson",
+      "buildings": 1181,
+      "size_mb": 14.5,
+      "bounds": {
+        "west": -114.2502883,
+        "east": -114.1996168,
+        "south": 51.1498722,
+        "north": 51.1956341
+      }
+    },
+    {
+      "file": "tile_-2278_1021.geojson",
+      "buildings": 30,
+      "size_mb": 0.2,
+      "bounds": {
+        "west": -113.892286,
+        "east": -113.8664197,
+        "south": 51.0515402,
+        "north": 51.0590373
+      }
+    },
+    {
+      "file": "tile_-2284_1017.geojson",
+      "buildings": 25,
+      "size_mb": 0.1,
+      "bounds": {
+        "west": -114.193443,
+        "east": -114.1646038,
+        "south": 50.8945597,
+        "north": 50.900043
+      }
+    },
+    {
+      "file": "tile_-2284_1018.geojson",
+      "buildings": 70,
+      "size_mb": 0.54,
+      "bounds": {
+        "west": -114.1970733,
+        "east": -114.1501941,
+        "south": 50.8998633,
+        "north": 50.9496708
+      }
+    },
+    {
+      "file": "tile_-2286_1020.geojson",
+      "buildings": 10,
+      "size_mb": 0.15,
+      "bounds": {
+        "west": -114.2611619,
+        "east": -114.2589966,
+        "south": 51.0132082,
+        "north": 51.0149105
+      }
+    },
+    {
+      "file": "tile_-2281_1024.geojson",
+      "buildings": 32,
+      "size_mb": 0.15,
+      "bounds": {
+        "west": -114.0476525,
+        "east": -114.0107336,
+        "south": 51.2008337,
+        "north": 51.2119234
+      }
+    },
+    {
+      "file": "tile_-2285_1018.geojson",
+      "buildings": 34,
+      "size_mb": 0.1,
+      "bounds": {
+        "west": -114.2076366,
+        "east": -114.205452,
+        "south": 50.9188542,
+        "north": 50.9206434
+      }
+    },
+    {
+      "file": "tile_-2278_1018.geojson",
+      "buildings": 157,
+      "size_mb": 0.7,
+      "bounds": {
+        "west": -113.8999535,
+        "east": -113.860534,
+        "south": 50.8997784,
+        "north": 50.9496873
+      }
+    },
+    {
+      "file": "tile_-2278_1017.geojson",
+      "buildings": 58,
+      "size_mb": 0.24,
+      "bounds": {
+        "west": -113.8995331,
+        "east": -113.8635087,
+        "south": 50.8560375,
+        "north": 50.8998072
+      }
+    },
+    {
+      "file": "tile_-2286_1023.geojson",
+      "buildings": 275,
+      "size_mb": 2.54,
+      "bounds": {
+        "west": -114.2570251,
+        "east": -114.2498344,
+        "south": 51.1499728,
+        "north": 51.1538148
+      }
+    },
+    {
+      "file": "tile_-2278_1020.geojson",
+      "buildings": 90,
+      "size_mb": 0.45,
+      "bounds": {
+        "west": -113.8991183,
+        "east": -113.8672963,
+        "south": 51.0090001,
+        "north": 51.0460563
+      }
+    },
+    {
+      "file": "tile_-2283_1024.geojson",
+      "buildings": 10,
+      "size_mb": 0.05,
+      "bounds": {
+        "west": -114.1210817,
+        "east": -114.1070475,
+        "south": 51.2023113,
+        "north": 51.207686
+      }
+    },
+    {
+      "file": "tile_-2280_1016.geojson",
+      "buildings": 97,
+      "size_mb": 1.11,
+      "bounds": {
+        "west": -113.983161,
+        "east": -113.9498517,
+        "south": 50.8330502,
+        "north": 50.8497749
+      }
+    },
+    {
+      "file": "tile_-2279_1016.geojson",
+      "buildings": 94,
+      "size_mb": 0.74,
+      "bounds": {
+        "west": -113.949442,
+        "east": -113.9294424,
+        "south": 50.833061,
+        "north": 50.8457566
+      }
+    },
+    {
+      "file": "tile_-2282_1024.geojson",
+      "buildings": 68,
+      "size_mb": 0.39,
+      "bounds": {
+        "west": -114.0975944,
+        "east": -114.0521626,
+        "south": 51.2017763,
+        "north": 51.2123655
+      }
+    },
+    {
+      "file": "tile_-2282_1016.geojson",
+      "buildings": 2,
+      "size_mb": 0.01,
+      "bounds": {
+        "west": -114.0856541,
+        "east": -114.0818358,
+        "south": 50.8485043,
+        "north": 50.8491059
+      }
+    },
+    {
+      "file": "tile_-2284_1019.geojson",
+      "buildings": 1,
+      "size_mb": 0.0,
+      "bounds": {
+        "west": -114.1656209,
+        "east": -114.1654244,
+        "south": 50.9821297,
+        "north": 50.9822386
+      }
+    },
+    {
+      "file": "tile_-2281_1016.geojson",
+      "buildings": 6,
+      "size_mb": 0.03,
+      "bounds": {
+        "west": -114.0381894,
+        "east": -114.0261723,
+        "south": 50.8488268,
+        "north": 50.8502842
+      }
+    }
+  ]
+}

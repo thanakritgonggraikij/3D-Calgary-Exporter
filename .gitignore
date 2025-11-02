@@ -1,0 +1,31 @@
+# Large data files - hosted on Cloudflare R2 instead
+buildings.geojson
+
+# Large tile files (hosted on Cloudflare R2)
+buildings_chunks/*.geojson
+# Keep the index file
+!buildings_chunks/chunks_index.json
+
+# Wrangler
+.wrangler/
+
+# Archive
+archive/
+
+# Node modules if you add any
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
