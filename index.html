@@ -161,7 +161,7 @@
         mapboxgl.accessToken = 'pk.eyJ1IjoiZ3Jpc2ZhYXMiLCJhIjoiY21iemNhd3FmMXdqaDJtb2o4ejRibTNseSJ9.7SGZ6pBZdjVIAqKi0pOi7g';
         const CALGARY_API = 'https://data.calgary.ca/resource/cchr-krqg.json';
         // Cloudflare R2 base URL for tiled detailed buildings
-        const R2_BASE_URL = 'https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/';
+        const R2_BASE_URL = 'https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_chunks/';
         const CHUNKS_INDEX_URL = R2_BASE_URL + 'chunks_index.json';
         
         let currentBuildings = []; // API buildings for visualization
@@ -650,10 +650,14 @@
                                     objContent += `v ${localCoords.x.toFixed(3)} ${realisticGroundZ.toFixed(3)} ${localCoords.y.toFixed(3)}\n`;
                                 });
 
-                                // Create top vertices
+                                // Create top vertices - USE Z COORDINATES FROM GEOMETRY!
                                 ring.forEach((coord, i) => {
                                     const localCoords = toLocalMeters(coord[0], coord[1]);
-                                    const detailedRooftopZ = getDetailedRooftopElevation(coord[0], coord[1], { properties: building }, i, numVerts);
+                                    // If geometry has Z coordinate (detailed roof), use it directly
+                                    // Otherwise fall back to calculated elevation
+                                    const detailedRooftopZ = (coord.length > 2 && coord[2] !== undefined) 
+                                        ? coord[2] 
+                                        : getDetailedRooftopElevation(coord[0], coord[1], { properties: building }, i, numVerts);
                                     topVertices.push({
                                         x: localCoords.x,
                                         y: detailedRooftopZ,

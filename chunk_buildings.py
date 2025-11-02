@@ -162,7 +162,7 @@ if __name__ == "__main__":
     # Configuration
     INPUT_FILE = "buildings.geojson"
     OUTPUT_DIR = "buildings_chunks"
-    CELL_SIZE = 0.05  # Adjust this: 0.05 ≈ 5km, 0.02 ≈ 2km (smaller = more chunks)
+    CELL_SIZE = 0.01  # 0.01 degrees ≈ 1km at Calgary's latitude (was 0.05 = 5km)
     
     print("=" * 60)
     print("Calgary Buildings Chunking Script")
