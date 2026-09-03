@@ -16,5 +16,10 @@ const geocoder = new MapboxGeocoder({
     bbox: [-114.3, 50.8, -113.8, 51.2],
     placeholder: 'Search Calgary addresses...'
 });
-document.getElementById('geocoder').appendChild(geocoder.onAdd(appMap));
+function attachGeocoder() {
+    const container = document.getElementById('geocoder');
+    if (container) container.appendChild(geocoder.onAdd(appMap));
+    else requestAnimationFrame(attachGeocoder);
+}
+attachGeocoder();
 appMap.addControl(new mapboxgl.NavigationControl());
