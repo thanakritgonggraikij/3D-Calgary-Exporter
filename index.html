@@ -132,8 +132,8 @@
     <div class="controls">
         <h3>Calgary 3D Buildings</h3>
         <div id="geocoder"></div>
-        <button class="btn btn-primary" id="loadBuildings">
-            Load API Buildings (Preview)
+        <button class="btn btn-primary" id="loadApiTrees">
+            Load API Trees
         </button>
         <button class="btn btn-primary" id="loadDetailedBuildings">
             Load Detailed 3D Buildings
@@ -150,11 +150,7 @@
         <div id="status" class="status"></div>
         <div class="info">
             <strong>Workflow:</strong><br>
-            1. Search address or pan to area<br>
-            2. "Load API Buildings" - Quick preview (simple geometry)<br>
-            3. "Load Detailed 3D Buildings" - Full roof details (from tiles)<br>
-            4. "Export OBJ" - Exports detailed buildings in current view<br>
-            <br>
+ Hello!!!!            <br>
             <strong>Note:</strong> OBJ export automatically loads detailed tile data for the current map extent.<br>
             <br>
             <strong>Data:</strong> City of Calgary Open Data
@@ -162,13 +158,16 @@
     </div>
 
     <script>
-        // Mapbox token
         mapboxgl.accessToken = 'pk.eyJ1IjoidGhhbmFrcml0Z29uZ2dyYWlraWoiLCJhIjoiY2x3aTZ2MnYxMHBqNzJqcXI2dHE2djR4biJ9.z-7jF__bVi_mLD2dnpbU7Q';
         const CALGARY_API = 'https://data.calgary.ca/resource/cchr-krqg.json';
+        const CALGARY_OD_PUBLIC_TREES = 'https://data.calgary.ca/resource/tfs4-3wwa.json'
+        const DEFAULT_TREE_HEIGHT_METERS = 6;
+        const DEFAULT_TREE_RADIUS_METERS = 0.25;
         const R2_BASE_URL = 'https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_chunks/';
         const CHUNKS_INDEX_URL = R2_BASE_URL + 'chunks_index.json'; 
         
         let currentBuildings = []; // API buildings, 2D Not detailed
+        let currentTrees = []; // API trees, points
         let detailedBuildingsCache = {}; // Cache for loaded detailed tiles
         let chunksIndex = null;  
 
@@ -211,7 +210,6 @@
             status.textContent = message;
             status.className = `status ${type}`;
         }
-
         function hideStatus() {
             document.getElementById('status').className = 'status';
         }
@@ -250,10 +248,8 @@
 
 
 
+// ---------------------------------------------------------- LOADERS --------------------------------------------------------------------------------------------------------------------
 
-
-
-        
         // ----------------------------- MAP VIEW INTERSECTION LOAD -----------------------------
         async function loadDetailedTilesForBounds(bounds) {
             if (!chunksIndex) {
@@ -295,7 +291,7 @@
             return allBuildings;
         }
 
-        // ----------------------------- 3D BUILDINGS CHUNK LOAD FROM R2 BUCKET -----------------------------
+        // ----------------------------- DETAILED 3D BUILDINGS CHUNK LOAD FROM R2 BUCKET -----------------------------
         async function loadDetailedBuildings() {
             showStatus('Loading detailed 3D buildings from tiles...', 'loading');
             
@@ -374,7 +370,7 @@
             }
         }
 
-        // ----------------------------- FETCH CALGARY BUILDINGS, 3D FILL EXTRUSIONS FROM API -----------------------------
+        // ----------------------------- FETCH API CALGARY BUILDINGS, 3D FILL EXTRUSIONS FROM API -----------------------------
         async function fetchBuildingsInView() {
             const bounds = map.getBounds();
 
@@ -480,6 +476,158 @@
             }
         }
 
+        // ----------------------------- FETCH API CALGARY TREES -----------------------------
+        async function fetchTreesInView() {
+            const bounds = map.getBounds();
+
+            // The tree dataset stores locations in the nested `point` field.
+            const params = new URLSearchParams({
+                '$where': `within_box(point, ${bounds.getNorth()}, ${bounds.getWest()}, ${bounds.getSouth()}, ${bounds.getEast()})`,
+                '$limit': '2000',
+            });
+
+            showStatus('Loading trees from Calgary Open Data...', 'loading');
+
+            try {
+                const url = `${CALGARY_OD_PUBLIC_TREES}?${params}`;
+                console.log('Requesting:', url);
+
+                const response = await fetch(url);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('API Error Response:', errorText);
+                    throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                console.log('Received data:', data.length, 'trees');
+
+                currentTrees = data;
+
+                // Convert to GeoJSON
+                const geojson = {
+                    type: 'FeatureCollection',
+                    features: data.map(tree => {
+                        const coordinates = tree.point && tree.point.coordinates;
+                        if (!coordinates || coordinates.length < 2) {
+                            return null;
+                        }
+
+                        const [longitude, latitude] = coordinates;
+                        const diameterCentimeters = Number.parseFloat(tree.dbh_cm);
+                        const height = DEFAULT_TREE_HEIGHT_METERS;
+
+                        // dbh_cm is trunk diameter, so convert centimetres to a
+                        // radius in metres for the extruded footprint.
+                        const radius = Number.isFinite(diameterCentimeters) && diameterCentimeters > 0
+                            ? diameterCentimeters / 200
+                            : DEFAULT_TREE_RADIUS_METERS;
+                        const circleCoordinates = Array.from({ length: 16 }, (_, index) => {
+                            const angle = (index / 16) * Math.PI * 2;
+                            const latitudeOffset = (radius * Math.sin(angle)) / 111320;
+                            const longitudeOffset = (radius * Math.cos(angle)) /
+                                (111320 * Math.cos(latitude * Math.PI / 180));
+                            return [longitude + longitudeOffset, latitude + latitudeOffset];
+                        });
+                        circleCoordinates.push(circleCoordinates[0]);
+
+                        return {
+                            type: 'Feature',
+                            geometry: {
+                                type: 'Polygon',
+                                coordinates: [circleCoordinates]
+                            },
+                            properties: {
+                                tree_asset_cd: tree.tree_asset_cd,
+                                common_name: tree.common_name,
+                                height
+                            }
+                        };
+                    }).filter(Boolean)
+                };
+
+                const treePointsGeoJSON = {
+                    type: 'FeatureCollection',
+                    features: data
+                        .filter(tree => tree.point && tree.point.coordinates)
+                        .map(tree => ({
+                            type: 'Feature',
+                            geometry: tree.point,
+                            properties: {
+                                tree_asset_cd: tree.tree_asset_cd,
+                                common_name: tree.common_name,
+                                // Use the DBH-derived radius for the map base circle.
+                                display_radius: Math.max(
+                                    6,
+                                    (Number.parseFloat(tree.dbh_cm) || 0) / 2
+                                )
+                            }
+                        }))
+                };
+
+                // Add to map
+                if (map.getSource('trees')) {
+                    map.getSource('trees').setData(geojson);
+                    map.getSource('tree-points').setData(treePointsGeoJSON);
+                } else {
+                    map.addSource('trees', {
+                        type: 'geojson',
+                        data: geojson
+                    });
+                    map.addSource('tree-points', {
+                        type: 'geojson',
+                        data: treePointsGeoJSON
+                    });
+
+                    map.addLayer({
+                        id: 'trees_base',
+                        type: 'circle',
+                        source: 'tree-points',
+                        paint: {
+                            'circle-color': '#006400',
+                            'circle-opacity': 0.2,
+                            'circle-radius': ['get', 'display_radius'],
+                            'circle-stroke-color': '#003d00',
+                            'circle-stroke-opacity': 0.8,
+                            'circle-stroke-width': 1
+                        }
+                    });
+                    map.addLayer({
+                        id: 'trees',
+                        type: 'fill-extrusion',
+                        source: 'trees',
+                        paint: {
+                            'fill-extrusion-color': '#228B22',
+                            'fill-extrusion-height': ['get', 'height'],
+                            'fill-extrusion-base': 0,
+                            'fill-extrusion-opacity': 0.8
+                        }
+                    });
+
+                }
+
+                showStatus(`✓ Loaded ${data.length} trees`, 'success');
+                // document.getElementById('exportGeoJSON').disabled = false;
+                // document.getElementById('exportOBJ').disabled = false;
+                // document.getElementById('exportExcel').disabled = false;
+
+                setTimeout(hideStatus, 3000);
+            } catch (error) {
+                showStatus('Error loading trees: ' + error.message, 'error');
+                console.error('Error:', error);
+            }
+        }
+
+
+
+
+
+// ---------------------------------------------------------- LOADERS --------------------------------------------------------------------------------------------------------------------
+
+
+
+
+// ---------------------------------------------------------- EXPORTERS --------------------------------------------------------------------------------------------------------------------
         // Export as GeoJSON
         function exportGeoJSON() {
             const geojson = {
@@ -857,9 +1005,14 @@
             showStatus(`✓ Excel file exported successfully (${currentBuildings.length} buildings)`, 'success');
             setTimeout(hideStatus, 3000);
         }
+// ---------------------------------------------------------- EXPORTERS --------------------------------------------------------------------------------------------------------------------
+
+
+
+
 
         // Event listeners
-        document.getElementById('loadBuildings').addEventListener('click', fetchBuildingsInView);
+        document.getElementById('loadApiTrees').addEventListener('click', fetchTreesInView);
         document.getElementById('loadDetailedBuildings').addEventListener('click', loadDetailedBuildings);
         document.getElementById('exportGeoJSON').addEventListener('click', exportGeoJSON);
         document.getElementById('exportOBJ').addEventListener('click', exportOBJ);
