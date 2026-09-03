@@ -3,6 +3,7 @@ buildings.geojson
 
 # Large tile files (hosted on Cloudflare R2)
 buildings_chunks/*.geojson
+
 # Keep the index file
 !buildings_chunks/chunks_index.json
 
@@ -29,3 +30,7 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+
+#QGIS Data
+QGIS-gdb-to-geojson

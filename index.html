@@ -118,6 +118,11 @@
     </style>
 </head>
 
+
+
+
+
+
 <body>
     <script src="https://cdn.jsdelivr.net/gh/jscastro76/threebox@v.2.2.2/dist/threebox.min.js"
         type="text/javascript"></script>
@@ -158,25 +163,34 @@
 
     <script>
         // Mapbox token
-        mapboxgl.accessToken = 'pk.eyJ1IjoiZ3Jpc2ZhYXMiLCJhIjoiY21iemNhd3FmMXdqaDJtb2o4ejRibTNseSJ9.7SGZ6pBZdjVIAqKi0pOi7g';
+        mapboxgl.accessToken = 'pk.eyJ1IjoidGhhbmFrcml0Z29uZ2dyYWlraWoiLCJhIjoiY2x3aTZ2MnYxMHBqNzJqcXI2dHE2djR4biJ9.z-7jF__bVi_mLD2dnpbU7Q';
         const CALGARY_API = 'https://data.calgary.ca/resource/cchr-krqg.json';
-        // Cloudflare R2 base URL for tiled detailed buildings
         const R2_BASE_URL = 'https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_chunks/';
-        const CHUNKS_INDEX_URL = R2_BASE_URL + 'chunks_index.json';
+        const CHUNKS_INDEX_URL = R2_BASE_URL + 'chunks_index.json'; 
         
-        let currentBuildings = []; // API buildings for visualization
+        let currentBuildings = []; // API buildings, 2D Not detailed
         let detailedBuildingsCache = {}; // Cache for loaded detailed tiles
-        let chunksIndex = null; // Metadata about all available tiles
+        let chunksIndex = null;  
 
         // Initialize map
         const map = new mapboxgl.Map({
             container: 'map',
-            style: 'mapbox://styles/grisfaas/cmhcfruw1002x01r640vt7qlf',
-            center: [-114.0719, 51.0447], // Calgary center
+            style: 'mapbox://styles/thanakritgonggraikij/cma1kzdn4010v01rmfzedhqvw',
+            center: [-114.0719, 51.0447], // Calgary!!!
             zoom: 16.5,
             pitch: 0,
             bearing: 0
         });
+
+
+
+
+
+
+
+
+
+
 
         // Add geocoder (address search)
         const geocoder = new MapboxGeocoder({
@@ -234,7 +248,13 @@
                      tileNorth < mapSouth || tileSouth > mapNorth);
         }
 
-        // Load detailed building tiles that intersect with current map view
+
+
+
+
+
+        
+        // ----------------------------- MAP VIEW INTERSECTION LOAD -----------------------------
         async function loadDetailedTilesForBounds(bounds) {
             if (!chunksIndex) {
                 throw new Error('Chunks index not loaded');
@@ -275,7 +295,7 @@
             return allBuildings;
         }
 
-        // Load detailed 3D buildings from hosted GeoJSON file
+        // ----------------------------- 3D BUILDINGS CHUNK LOAD FROM R2 BUCKET -----------------------------
         async function loadDetailedBuildings() {
             showStatus('Loading detailed 3D buildings from tiles...', 'loading');
             
@@ -321,7 +341,7 @@
                     features: detailedFeatures
                 };
                 
-                // Add to map
+                // ADD
                 if (map.getSource('buildings-detailed')) {
                     map.getSource('buildings-detailed').setData(geojson);
                 } else {
@@ -330,6 +350,8 @@
                         data: geojson
                     });
 
+
+                    // 3D PAINTING!!!
                     map.addLayer({
                         id: 'buildings-3d-detailed',
                         type: 'fill-extrusion',
@@ -352,7 +374,7 @@
             }
         }
 
-        // Fetch buildings from Calgary API with full schema
+        // ----------------------------- FETCH CALGARY BUILDINGS, 3D FILL EXTRUSIONS FROM API -----------------------------
         async function fetchBuildingsInView() {
             const bounds = map.getBounds();
 
@@ -379,7 +401,7 @@
                 const data = await response.json();
                 console.log('Received data:', data.length, 'buildings');
 
-                // DEBUG: Log first building's data to see what we actually have
+                // LOG FIRST BUILDING DATA -- WHAT DO WE GOT??
                 if (data.length > 0) {
                     console.log('First building sample:', data[0]);
                     console.log('Elevation data check:', {
@@ -501,7 +523,7 @@
             setTimeout(hideStatus, 3000);
         }
 
-        // Export as OBJ with genuinely detailed geometry and terrain following
+        // Export as OBJ with 3D detailed geometry THEN DEM terrain following
         async function exportOBJ() {
             showStatus('Loading detailed buildings for export...', 'loading');
             
@@ -542,17 +564,28 @@
                     }
                 }
 
-                // Helper function to convert lat/lon to local meters
+                // Convert WGS84 coordinates to a local east/north tangent plane.
                 function toLocalMeters(lon, lat) {
                     if (originLon === null || originLat === null) {
                         return { x: 0, y: 0 };
                     }
 
-                    const metersPerDegreeLon = 69172 * Math.cos(originLat * Math.PI / 180);
-                    const metersPerDegreeLat = 111320;
+                    const radians = Math.PI / 180;
+                    const latitude = originLat * radians;
+                    const deltaLongitude = (lon - originLon) * radians;
+                    const deltaLatitude = (lat - originLat) * radians;
+                    const semiMajorAxis = 6378137;
+                    const flattening = 1 / 298.257223563;
+                    const eccentricitySquared = flattening * (2 - flattening);
+                    const sinLatitude = Math.sin(latitude);
+                    const primeVerticalRadius = semiMajorAxis / Math.sqrt(
+                        1 - eccentricitySquared * sinLatitude * sinLatitude
+                    );
+                    const meridianRadius = semiMajorAxis * (1 - eccentricitySquared) /
+                        Math.pow(1 - eccentricitySquared * sinLatitude * sinLatitude, 1.5);
 
-                    const x = (lon - originLon) * metersPerDegreeLon;
-                    const y = (lat - originLat) * metersPerDegreeLat;
+                    const x = deltaLongitude * primeVerticalRadius * Math.cos(latitude);
+                    const y = deltaLatitude * meridianRadius;
 
                     return { x, y };
                 }
@@ -577,29 +610,9 @@
                 function getDetailedRooftopElevation(lon, lat, building, vertexIndex, totalVertices) {
                     const grdMinZ = parseFloat(building.properties.GRD_ELEV_MIN_Z) || 0;
                     const rooftopZ = parseFloat(building.properties.ROOFTOP_ELEV_Z) || (grdMinZ + 10);
-                    const rooftopX = parseFloat(building.properties.ROOFTOP_ELEV_X);
-                    const rooftopY = parseFloat(building.properties.ROOFTOP_ELEV_Y);
-
-                    let finalRooftopZ = rooftopZ;
-
-                    if (rooftopX && rooftopY) {
-                        const localCoords = toLocalMeters(lon, lat);
-                        const rooftopLocal = toLocalMeters(rooftopX, rooftopY);
-                        const distanceToRooftopPeak = Math.sqrt(
-                            Math.pow(localCoords.x - rooftopLocal.x, 2) +
-                            Math.pow(localCoords.y - rooftopLocal.y, 2)
-                        );
-
-                        const maxRoofVariation = 4.0;
-                        const roofSlopeEffect = Math.min(distanceToRooftopPeak * 0.05, maxRoofVariation);
-                        finalRooftopZ = rooftopZ - roofSlopeEffect;
-                    } else {
-                        const angle = (vertexIndex / totalVertices) * 2 * Math.PI;
-                        const roofPattern = Math.cos(angle * 2) * 1.5 + Math.sin(angle * 3) * 0.8;
-                        finalRooftopZ = rooftopZ + roofPattern;
-                    }
-
-                    return finalRooftopZ;
+                    const angle = (vertexIndex / totalVertices) * 2 * Math.PI;
+                    const roofPattern = Math.cos(angle * 2) * 1.5 + Math.sin(angle * 3) * 0.8;
+                    return rooftopZ + roofPattern;
                 }
 
                 objContent += `# Origin: ${originLon?.toFixed(6)}, ${originLat?.toFixed(6)}\n\n`;
@@ -789,7 +802,7 @@
             const workbook = XLSX.utils.book_new();
             const worksheet = XLSX.utils.json_to_sheet(excelData);
 
-            // Set column widths for better readability
+            // COL WIDTHDS
             const colWidths = [
                 { wch: 15 }, // GRD_ELEV_MIN_X
                 { wch: 15 }, // GRD_ELEV_MAX_X
