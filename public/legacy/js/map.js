@@ -9,17 +9,4 @@ window.appMap = new mapboxgl.Map({
     bearing: 0
 });
 
-const geocoder = new MapboxGeocoder({
-    accessToken: mapboxgl.accessToken,
-    mapboxgl,
-    countries: 'ca',
-    bbox: [-114.3, 50.8, -113.8, 51.2],
-    placeholder: 'Search Calgary addresses...'
-});
-function attachGeocoder() {
-    const container = document.getElementById('geocoder');
-    if (container) container.appendChild(geocoder.onAdd(appMap));
-    else requestAnimationFrame(attachGeocoder);
-}
-attachGeocoder();
 appMap.addControl(new mapboxgl.NavigationControl());

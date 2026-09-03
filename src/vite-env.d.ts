@@ -4,6 +4,7 @@ declare const exportGeoJSON: () => void
 declare const exportOBJ: () => Promise<void>
 declare const exportExcel: () => void
 declare const loadChunksIndex: () => Promise<void>
-declare const appMap: { on: (event: string, callback: () => void) => void }
+declare const AppConfig: { mapboxToken: string }
+declare const appMap: { on: (event: string, callback: () => void) => void; flyTo: (options: { center: [number, number]; zoom: number }) => void }
 
 declare module "*.css" {}
