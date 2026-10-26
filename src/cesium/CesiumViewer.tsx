@@ -50,7 +50,7 @@ export default function CesiumViewer({ onReady }: CesiumViewerProps) {
         destination: Cartesian3.fromDegrees(-114.0719, 51.0447, 1800),
         orientation: {
           heading: CesiumMath.toRadians(0),
-          pitch: CesiumMath.toRadians(-75),
+          pitch: CesiumMath.toRadians(-90),
           roll: 0,
         },
         duration: 0,

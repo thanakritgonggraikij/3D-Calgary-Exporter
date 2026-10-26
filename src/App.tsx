@@ -66,9 +66,9 @@ export default function App() {
               {busy === "dem" ? <LoaderCircle className="animate-spin" /> : <Mountain />}
               Load DEM Extent
             </Button>
-            <Button variant="secondary" className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("obj", exportBuildingsObj, ({ buildingCount, treeCount }) => `Exported OBJ with ${buildingCount} buildings and ${treeCount} trees`)}>
+            <Button variant="secondary" className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("obj", exportBuildingsObj, ({ buildingCount, treeCount, terrainChunkCount }) => `Exported OBJ with ${buildingCount} buildings, ${treeCount} trees, and ${terrainChunkCount} terrain chunks`)}>
               {busy === "obj" ? <LoaderCircle className="animate-spin" /> : <Download />}
-              Export OBJ
+              Export Buildings, Trees & DEM OBJ
             </Button>
             {status && <div role="status" className={`status ${status.type}`}>{status.message}</div>}
           </CardContent>

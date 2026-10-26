@@ -24,7 +24,8 @@ Without a token, the app opens a globe centered on Calgary using ellipsoid terra
 
 - **Load Trees (API)** requests City of Calgary tree points in the current camera view and displays them as Cesium point entities.
 - **Load Buildings In View** reads the existing detailed building chunks for the camera view and displays them as simple Cesium extrusions for a lightweight preview.
-- **Export OBJ** exports detailed building chunks intersecting the current view, preserving each source coordinate's roof elevation to retain complex roof geometry. It also queries trees in the view and adds each as a capped 5 m tall, 0.25 m radius cylinder positioned on sampled terrain.
+- **Load DEM Extent** draws the indexed DEM chunk footprints that intersect the current view without downloading their OBJ meshes.
+- **Export Buildings, Trees & DEM OBJ** combines detailed building geometry, capped 5 m tall and 0.25 m radius tree cylinders, and DEM chunk meshes intersecting the current view. DEM chunks are positioned from their indexed geographic bounds; their relative heights are aligned to sampled Cesium terrain. This export requires a non-ellipsoid Cesium terrain provider, normally enabled with a Cesium ion token.
 
 These controls use Cesium's camera view rectangle; they no longer rely on Mapbox bounds or Mapbox rendering layers.
 

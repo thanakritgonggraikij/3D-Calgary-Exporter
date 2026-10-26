@@ -146,7 +146,7 @@ def main():
 
             with open(out_path, "w") as f:
                 for xi, yi, zi in zip(x - x0, y - y0, z - z0):
-                    f.write(f"v {xi:.3f} {zi:.3f} {yi:.3f}\n") # Swapped Y/Z for Y-up software
+                    f.write(f"v {xi:.3f} {yi:.3f} {zi:.3f}\n") # Keep X, projected Y, and elevation Z in their original order.
                 for a, b, c in all_tris:
                     f.write(f"f {a+1} {b+1} {c+1}\n")
 
