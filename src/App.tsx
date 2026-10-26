@@ -33,34 +33,48 @@ export default function App() {
   }
 
   return (
-    <aside className="controls absolute right-5 top-5 z-10 w-[min(22rem,calc(100vw-2.5rem))]">
+    <aside className="controls absolute left-5 top-5 z-10 w-[min(22rem,calc(100vw-2.5rem))]">
       <Card>
         <CardHeader className="pb-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Calgary / field tools</p>
-          <CardTitle className="text-2xl">Topo Exporter</CardTitle>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">CALGARY</p>
+          <CardTitle className="text-2xl">3D CONTEXT EXPORTER</CardTitle>
+
           <div id="geocoder" className="pt-2" />
+
         </CardHeader>
+
         <CardContent className="space-y-3">
-          <Button id="loadApiTrees" className="w-full justify-start" disabled={busy !== null} onClick={() => void runAction("trees", fetchTreesInView, "Trees loaded") }>
+
+          <p>LOAD ELEMENTS IN VIEW</p>
+
+
+          <Button id="loadApiTrees" className="w-full justify-start" disabled={busy !== null} onClick={() => void runAction("trees", fetchTreesInView, "Trees loaded")}>
             {busy === "trees" ? <LoaderCircle className="animate-spin" /> : <Trees />}
-            Load API trees
+            Load Trees (API)
           </Button>
-          <Button id="loadDetailedBuildings" className="w-full justify-start" disabled={busy !== null} onClick={() => void runAction("buildings", loadDetailedBuildings, "Detailed buildings loaded") }>
+
+          <Button id="loadDetailedBuildings" className="w-full justify-start" disabled={busy !== null} onClick={() => void runAction("buildings", loadDetailedBuildings, "Detailed buildings loaded")}>
             {busy === "buildings" ? <LoaderCircle className="animate-spin" /> : <Layers3 />}
-            Load detailed buildings
+            Load Buildings In View
           </Button>
-          <Separator />
+
+          {/* <Separator /> */}
+
           <Button id="exportGeoJSON" variant="secondary" className="w-full justify-start" disabled={busy !== null} onClick={() => void runAction("geojson", exportGeoJSON)}>
             <Download /> Export GeoJSON
           </Button>
+
           <Button id="exportOBJ" variant="secondary" className="w-full justify-start" disabled={busy !== null} onClick={() => void runAction("obj", exportOBJ)}>
             <Download /> Export OBJ
           </Button>
-          <Button id="exportExcel" variant="secondary" className="w-full justify-start" disabled={busy !== null} onClick={() => void runAction("excel", exportExcel)}>
+
+          {/* <Button id="exportExcel" variant="secondary" className="w-full justify-start" disabled={busy !== null} onClick={() => void runAction("excel", exportExcel)}>
             <FileSpreadsheet /> Export Excel metadata
-          </Button>
+          </Button> */}
+
           {status && <div id="status" role="status" className={`status ${status.type}`}>{status.message}</div>}
-          <p className="border-t pt-3 text-xs leading-relaxed text-muted-foreground">Search an address, load the data in your current view, then export it. Sources: City of Calgary Open Data.</p>
+
+          {/* <p className="border-t pt-3 text-xs leading-relaxed text-muted-foreground">Search an address, load the data in your current view, then export it. Sources: City of Calgary Open Data.</p> */}
         </CardContent>
       </Card>
     </aside>
