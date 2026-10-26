@@ -16,6 +16,9 @@ archive/
 # Node modules if you add any
 node_modules/
 dist/
+.env
+.env.*
+!.env.example
 
 # Python cache
 __pycache__/
