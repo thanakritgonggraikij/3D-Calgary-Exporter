@@ -15,6 +15,7 @@ archive/
 
 # Node modules if you add any
 node_modules/
+dist/
 
 # Python cache
 __pycache__/
@@ -33,4 +34,7 @@ Thumbs.db
 
 
 #QGIS Data
-QGIS-gdb-to-geojson
+QGIS/
+
+#README
+README.md
