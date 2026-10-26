@@ -1,9 +1,9 @@
 import { useState } from "react"
-import { Download, Layers3, LoaderCircle, Trees } from "lucide-react"
+import { Download, Layers3, LoaderCircle, Mountain, Trees } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import CesiumViewer from "@/cesium/CesiumViewer"
-import { exportBuildingsObj, loadBuildingsInView, loadTreesInView } from "@/cesium/data"
+import { exportBuildingsObj, loadBuildingsInView, loadDEMExtent, loadTreesInView } from "@/cesium/data"
 import type { Viewer } from "cesium"
 
 export default function App() {
@@ -61,6 +61,10 @@ export default function App() {
             <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("buildings", loadBuildingsInView, (count) => `Loaded ${count} detailed buildings`)}>
               {busy === "buildings" ? <LoaderCircle className="animate-spin" /> : <Layers3 />}
               Load Buildings In View
+            </Button>
+            <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("dem", loadDEMExtent, (count) => `Loaded ${count} DEM chunk extents`)}>
+              {busy === "dem" ? <LoaderCircle className="animate-spin" /> : <Mountain />}
+              Load DEM Extent
             </Button>
             <Button variant="secondary" className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("obj", exportBuildingsObj, ({ buildingCount, treeCount }) => `Exported OBJ with ${buildingCount} buildings and ${treeCount} trees`)}>
               {busy === "obj" ? <LoaderCircle className="animate-spin" /> : <Download />}

@@ -2,8 +2,10 @@ import {
   Cartesian3,
   Cartographic,
   Color,
+  HeightReference,
   Math as CesiumMath,
   PolygonHierarchy,
+  Rectangle,
   sampleTerrain,
   sampleTerrainMostDetailed,
   type Viewer,
@@ -11,13 +13,17 @@ import {
 
 const treesApi = "https://data.calgary.ca/resource/tfs4-3wwa.json"
 const chunksBaseUrl = "https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_chunks/"
+const demChunksBaseUrl = "https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_chunks/"
 const treeEntityPrefix = "calgary-tree-"
 const buildingEntityPrefix = "calgary-building-"
+const demExtentEntityPrefix = "calgary-dem-extent-"
 const treeHeightMeters = 5
 const treeRadiusMeters = 0.25
 const treeCylinderSegments = 16
 
 type ViewBounds = { north: number; south: number; east: number; west: number }
+type DEMChunk = { file: string; bounds: ViewBounds }
+type DEMChunksIndex = { chunks: DEMChunk[] }
 type Coordinate = [number, number, number?]
 type BuildingGeometry =
   | { type: "Polygon"; coordinates: Coordinate[][] }
@@ -39,6 +45,7 @@ type TreeInView = { tree: TreeRecord; index: number; longitude: number; latitude
 type TreeAtGround = TreeInView & { ground: number }
 
 let chunksIndexPromise: Promise<ChunksIndex> | undefined
+let demChunksIndexPromise: Promise<DEMChunksIndex> | undefined
 const chunkCache = new Map<string, BuildingFeature[]>()
 
 function getViewBounds(viewer: Viewer): ViewBounds {
@@ -70,6 +77,14 @@ async function getChunksIndex() {
   return chunksIndexPromise
 }
 
+async function getDEMChunksIndex() {
+  demChunksIndexPromise ??= fetchJson<DEMChunksIndex>(`${demChunksBaseUrl}chunks_index.json`).catch((error: unknown) => {
+    demChunksIndexPromise = undefined
+    throw error
+  })
+  return demChunksIndexPromise
+}
+
 async function loadDetailedFeatures(viewer: Viewer) {
   const bounds = getViewBounds(viewer)
   const index = await getChunksIndex()
@@ -84,6 +99,38 @@ async function loadDetailedFeatures(viewer: Viewer) {
     return features
   }))
   return featureLists.flat()
+}
+
+export async function loadDEMExtent(viewer: Viewer) {
+  const bounds = getViewBounds(viewer)
+  const index = await getDEMChunksIndex()
+  const chunks = index.chunks.filter((chunk) => overlaps(chunk.bounds, bounds))
+
+  viewer.entities.values
+    .filter((entity) => entity.id.startsWith(demExtentEntityPrefix))
+    .forEach((entity) => viewer.entities.remove(entity))
+
+  chunks.forEach(({ bounds: chunkBounds }, index) => {
+    viewer.entities.add({
+      id: `${demExtentEntityPrefix}${index}`,
+      name: "DEM chunk extent",
+      rectangle: {
+        coordinates: Rectangle.fromDegrees(
+          chunkBounds.west,
+          chunkBounds.south,
+          chunkBounds.east,
+          chunkBounds.north,
+        ),
+        height: 0,
+        heightReference: HeightReference.CLAMP_TO_GROUND,
+        material: Color.CYAN.withAlpha(0.12),
+        outline: true,
+        outlineColor: Color.CYAN,
+      },
+    })
+  })
+
+  return chunks.length
 }
 
 async function fetchTreesInView(viewer: Viewer) {
