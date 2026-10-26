@@ -19,7 +19,7 @@ OUTPUT_FILE = OUTPUT_DIR / "chunks_index.json"
 MAX_ERROR = 0.25         # meters; raise for fewer triangles
 V_EXAG = 1.0             # 1.0 = true scale
 THICKNESS = 5.0          # thickness in meters
-READ_LIMIT = 25               # Set to an integer (e.g. 25) to test first N files, or set to None to process all
+READ_LIMIT = None               # Set to an integer (e.g. 25) to test first N files, or set to None to process all
 
 # Ensure output directory exists
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
