@@ -58,11 +58,11 @@ export default function App() {
               <li>Optionally preview trees, buildings, and terrain.</li>
               <li>Select EXPORT .OBJ to download the scene for Blender.</li>
             </ol>
-            {!hasIonToken && (
+            {/* {!hasIonToken && (
               <p className="text-xs text-muted-foreground">
                 Set <code>VITE_CESIUM_ION_ACCESS_TOKEN</code> in <code>.env.local</code>.
               </p>
-            )}
+            )} */}
    
 
             <hr></hr>
