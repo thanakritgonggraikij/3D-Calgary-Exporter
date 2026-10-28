@@ -1,37 +1,15 @@
-<!-- npm run dev -->
-
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EXPORTER</title>
-    <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/v3.15.0/mapbox-gl.css">
-    <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.1.0/mapbox-gl-geocoder.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jscastro76/threebox@v.2.2.2/dist/threebox.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Calgary Context Exporter</title>
+  <script>
+    window.CESIUM_BASE_URL = "/cesium/"
+  </script>
 </head>
-
 <body>
-    <div id="map"></div>
-    <div id="root"></div>
-
-    <!-- libraries -->
-    <script src="https://api.mapbox.com/mapbox-gl-js/v3.15.0/mapbox-gl.js"></script>
-    <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.1.0/mapbox-gl-geocoder.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/jscastro76/threebox@v.2.2.2/dist/threebox.min.js"></script>
-
-    <!-- Load Order -->
-    <script src="/legacy/js/config.js"></script>
-    <script src="/legacy/js/state.js"></script>
-    <script src="/legacy/js/ui.js"></script>
-    <script src="/legacy/js/geo.js"></script>
-    <script src="/legacy/js/map.js"></script>
-    <script src="/legacy/js/buildings.js"></script>
-    <script src="/legacy/js/trees.js"></script>
-    <script src="/legacy/js/exporters.js"></script>
-    <script type="module" src="/index.tsx"></script>
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
 </body>
-
 </html>
