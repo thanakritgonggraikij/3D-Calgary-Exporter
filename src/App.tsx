@@ -56,8 +56,9 @@ export default function App() {
             <ol className="export-steps">
               <li>Click the map to choose an export center.</li>
               <li>Optionally preview trees, buildings, and terrain.</li>
-              <li>Select Export .OBJ to download the scene for Blender.</li>
+              <li>Select Export .OBJ to download the file for Blender.</li>
             </ol>
+
             {/* {!hasIonToken && (
               <p className="text-xs text-muted-foreground">
                 Set <code>VITE_CESIUM_ION_ACCESS_TOKEN</code> in <code>.env.local</code>.
@@ -66,7 +67,7 @@ export default function App() {
 
 
             <hr></hr>
-            <h3>View Elements On Map</h3>
+            <h3>Show Elements On Map</h3>
 
             <div className="flex flex-col gap-1">
               <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("buildings", loadBuildingsInArea, (count) => `Loaded ${count} detailed buildings`)}>

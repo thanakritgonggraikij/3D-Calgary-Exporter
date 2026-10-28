@@ -2,40 +2,40 @@
 @config "../tailwind.config.js";
 
 @font-face {
-  font-family: "PP Neue Montreal";
-  src: url("/fonts/PPNeueMontreal-Regular.otf") format("opentype");
+  font-family: "ABC Monument Grotesk";
+  src: url("/fonts/ABCMonumentGrotesk-Regular.otf") format("opentype");
   font-style: normal;
   font-weight: 400;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "PP Neue Montreal";
-  src: url("/fonts/PPNeueMontreal-Book.otf") format("opentype");
+  font-family: "ABC Monument Grotesk";
+  src: url("/fonts/ABCMonumentGrotesk-Medium.otf") format("opentype");
   font-style: normal;
-  font-weight: 450;
+  font-weight: 500;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "PP Neue Montreal";
-  src: url("/fonts/PPNeueMontreal-Semibold.otf") format("opentype");
+  font-family: "ABC Monument Grotesk";
+  src: url("/fonts/ABCMonumentGrotesk-Bold.otf") format("opentype");
   font-style: normal;
-  font-weight: 600;
+  font-weight: 600 700;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "PP Neue Montreal";
-  src: url("/fonts/PPNeueMontreal-Extrabold.otf") format("opentype");
+  font-family: "ABC Monument Grotesk";
+  src: url("/fonts/ABCMonumentGrotesk-Heavy.otf") format("opentype");
   font-style: normal;
-  font-weight: 800;
+  font-weight: 800 900;
   font-display: swap;
 }
 
 @font-face {
-  font-family: "PP Neue Montreal";
-  src: url("/fonts/PPNeueMontreal-Italic.otf") format("opentype");
+  font-family: "ABC Monument Grotesk";
+  src: url("/fonts/ABCMonumentGrotesk-Italic.otf") format("opentype");
   font-style: italic;
   font-weight: 400;
   font-display: swap;
@@ -84,7 +84,7 @@
 .controls button,
 .controls button *,
 .controls code {
-  font-family: "PP Neue Montreal", Arial, sans-serif;
+  font-family: "ABC Monument Grotesk", Arial, sans-serif;
 }
 
 .app-shell,
@@ -107,7 +107,7 @@
   width: min(22rem, calc(100vw - 2.5rem));
   max-height: calc(100vh - 2.5rem);
   overflow-y: auto;
-  font-family: "PP Neue Montreal", Arial, sans-serif;
+  font-family: "ABC Monument Grotesk", Arial, sans-serif;
   /* border-radius: 1rem; */
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--border)) transparent;
@@ -118,7 +118,7 @@
   overflow: hidden;
   border: 2px solid rgb(255 255 255 / 72%);
   /* border-radius: 1rem; */
-  background: rgb(255 255 255 / 92%);
+  background: rgb(255 255 255 / 100%);
   box-shadow:
     0 1.5rem 4rem rgb(18 43 48 / 18%),
     0 0.25rem 0.75rem rgb(18 43 48 / 8%);
@@ -132,7 +132,7 @@
 
 .controls .controls-title {
   color: hsl(var(--foreground));
-  font-family: "PP Neue Montreal", Arial, sans-serif;
+  font-family: "ABC Monument Grotesk", Arial, sans-serif;
   font-size: 3rem;
   font-weight: 600;
   letter-spacing: -0.015em;
@@ -144,7 +144,6 @@
   color: hsl(var(--primary));
   font-size: 1.25rem;
   font-weight: 600;
-  letter-spacing: 0.17em;
   line-height: 1.3;
   text-transform: none;
 }
@@ -195,21 +194,16 @@
   counter-increment: export-step;
 }
 
-.export-steps li::before {
-  position: absolute;
-  top: 0.02rem;
-  left: 0;
-  display: grid;
-  width: 1.35rem;
-  height: 1.35rem;
-  place-items: center;
-  /* border-radius: 50%; */
-  background: #171717;
-  color: #fff;
-  content: counter(export-step);
-  font-size: 0.7rem;
-  font-weight: 700;
-}
+  .export-steps li::before {
+    position: absolute;
+    top: 0.02rem;
+    left: 0;
+    color: #171717;
+    content: "[" counter(export-step) "]";
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.15;
+  }
 
 .controls hr {
   height: 1px;
@@ -235,18 +229,19 @@
 
 .controls button:not(:disabled):hover {
   transform: translateY(-1px);
-  background-color: #bfe4b1;
-  box-shadow: 0 0.4rem 0.9rem rgb(18 43 48 / 13%);
+  background-color: black;
+  color: white;
 }
 
 .controls button.export-button {
-  border-color: #030303;
-  background-color: #f8decc;
-  color: #020202;
+  color: black;
+  background-color: #000000;
+  color: white;
 }
 
 .controls button.export-button:not(:disabled):hover {
-  background-color: #ffa66e;
+  background-color: #ffffff;
+  color: black;
 }
 
 .controls button:disabled {
