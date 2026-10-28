@@ -43,8 +43,8 @@ export default function App() {
       <aside className="controls">
         <Card>
           <CardHeader>
-            <CardTitle className="controls-title">CONTEXT EXPORTER</CardTitle>
-            <p className="controls-subtitle">Calgary</p>
+            <CardTitle className="controls-title">Context Exporter</CardTitle>
+            <p className="controls-subtitle">Calgary Only</p>
 
           </CardHeader>
 
@@ -56,38 +56,43 @@ export default function App() {
             <ol className="export-steps">
               <li>Click the map to choose an export center.</li>
               <li>Optionally preview trees, buildings, and terrain.</li>
-              <li>Select EXPORT .OBJ to download the scene for Blender.</li>
+              <li>Select Export .OBJ to download the scene for Blender.</li>
             </ol>
             {/* {!hasIonToken && (
               <p className="text-xs text-muted-foreground">
                 Set <code>VITE_CESIUM_ION_ACCESS_TOKEN</code> in <code>.env.local</code>.
               </p>
             )} */}
-   
+
 
             <hr></hr>
             <h3>View Elements On Map</h3>
 
-            <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("trees", loadTreesInArea, (count) => `Loaded ${count} trees`)}>
-              {busy === "trees" ? <LoaderCircle className="animate-spin" /> : <Trees />}
-              View Trees in Selection
-            </Button>
-            <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("buildings", loadBuildingsInArea, (count) => `Loaded ${count} detailed buildings`)}>
-              {busy === "buildings" ? <LoaderCircle className="animate-spin" /> : <Layers3 />}
-              View Buildings in Selection
-            </Button>
-            <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("dem", loadDEMExtent, (count) => `Loaded ${count} DEM chunk extents`)}>
-              {busy === "dem" ? <LoaderCircle className="animate-spin" /> : <Mountain />}
-              View Extent of Terrain
-            </Button>
+            <div className="flex flex-col gap-1">
+              <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("buildings", loadBuildingsInArea, (count) => `Loaded ${count} detailed buildings`)}>
+                {busy === "buildings" ? <LoaderCircle className="animate-spin" /> : <Layers3 />}
+                BUILDINGS
+              </Button>
 
+              <div className="flex flex-row gap-1">
+                <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("trees", loadTreesInArea, (count) => `Loaded ${count} trees`)}>
+                  {busy === "trees" ? <LoaderCircle className="animate-spin" /> : <Trees />}
+                  TREES
+                </Button>
+                <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("dem", loadDEMExtent, (count) => `Loaded ${count} DEM chunk extents`)}>
+                  {busy === "dem" ? <LoaderCircle className="animate-spin" /> : <Mountain />}
+                  TERRAIN
+                </Button>
+              </div>
+
+            </div>
             <hr></hr>
 
             <h3>Export</h3>
 
             <Button variant="secondary" className="export-button w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("obj", exportBuildingsObj, ({ buildingCount, treeCount, terrainChunkCount }) => `Exported OBJ with ${buildingCount} buildings, ${treeCount} trees, and ${terrainChunkCount} terrain chunks`)}>
               {busy === "obj" ? <LoaderCircle className="animate-spin" /> : <Download />}
-              .OBJ (Blender)
+              .OBJ (BLENDER/SKP)
             </Button>
             {status && <div role="status" className={`status ${status.type}`}>{status.message}</div>}
           </CardContent>
