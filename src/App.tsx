@@ -1,3 +1,5 @@
+
+
 import { useState } from "react"
 import { Download, Layers3, LoaderCircle, Mountain, Trees } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -41,40 +43,51 @@ export default function App() {
       <aside className="controls">
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl">CALGARY CONTEXT EXPORTER</CardTitle>
+            <CardTitle className="controls-title">CONTEXT EXPORTER</CardTitle>
+            <p className="controls-subtitle">Calgary</p>
+
           </CardHeader>
+
           <CardContent className="space-y-3">
-            <p className="font-medium">This app is used for exporting Detailed 3D Models of Calgary as .OBJ to be used in Blender or Sketchup.</p>
-            <p className="text-sm text-muted-foreground">
-              {hasIonToken
-                ? "Cesium ion terrain is enabled. Use the search control on the globe to find an address."
-                : "The globe is ready. Add a Cesium ion token to enable world terrain."}
-            </p>
+
+            <hr></hr>
+            <h3>How To Use</h3>
+
+            <ol className="export-steps">
+              <li>Click the map to choose an export center.</li>
+              <li>Optionally preview trees, buildings, and terrain.</li>
+              <li>Select EXPORT .OBJ to download the scene for Blender.</li>
+            </ol>
             {!hasIonToken && (
               <p className="text-xs text-muted-foreground">
                 Set <code>VITE_CESIUM_ION_ACCESS_TOKEN</code> in <code>.env.local</code>.
               </p>
             )}
-            <p className="pt-2 text-sm font-medium">FIXED 3 × 3 CHUNK SELECTION</p>
-            <p className="text-xs text-muted-foreground">
-              Click the globe to choose the export center. The selected 2.4 km area loads at most nine chunks.
-              <span className="block font-mono">{selection.latitude.toFixed(5)}, {selection.longitude.toFixed(5)}</span>
-            </p>
+   
+
+            <hr></hr>
+            <h3>View Elements On Map</h3>
+
             <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("trees", loadTreesInArea, (count) => `Loaded ${count} trees`)}>
               {busy === "trees" ? <LoaderCircle className="animate-spin" /> : <Trees />}
-              Load Trees in Selection
+              View Trees in Selection
             </Button>
             <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("buildings", loadBuildingsInArea, (count) => `Loaded ${count} detailed buildings`)}>
               {busy === "buildings" ? <LoaderCircle className="animate-spin" /> : <Layers3 />}
-              Load Buildings in Selection
+              View Buildings in Selection
             </Button>
             <Button className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("dem", loadDEMExtent, (count) => `Loaded ${count} DEM chunk extents`)}>
               {busy === "dem" ? <LoaderCircle className="animate-spin" /> : <Mountain />}
-              Load DEM Selection Extents
+              View Extent of Terrain
             </Button>
-            <Button variant="secondary" className="w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("obj", exportBuildingsObj, ({ buildingCount, treeCount, terrainChunkCount }) => `Exported OBJ with ${buildingCount} buildings, ${treeCount} trees, and ${terrainChunkCount} terrain chunks`)}>
+
+            <hr></hr>
+
+            <h3>Export</h3>
+
+            <Button variant="secondary" className="export-button w-full justify-start" disabled={!viewer || busy !== null} onClick={() => void runAction("obj", exportBuildingsObj, ({ buildingCount, treeCount, terrainChunkCount }) => `Exported OBJ with ${buildingCount} buildings, ${treeCount} trees, and ${terrainChunkCount} terrain chunks`)}>
               {busy === "obj" ? <LoaderCircle className="animate-spin" /> : <Download />}
-              Export Buildings, Trees & DEM OBJ
+              .OBJ (Blender)
             </Button>
             {status && <div role="status" className={`status ${status.type}`}>{status.message}</div>}
           </CardContent>
