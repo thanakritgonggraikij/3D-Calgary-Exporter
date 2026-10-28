@@ -14,7 +14,8 @@ import {
 } from "cesium"
 import { getSelectionBounds, type MapSelection } from "./data"
 
-const ionAccessToken = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN?.trim()
+// const ionAccessToken = import.meta.env.VITE_CESIUM_ION_ACCESS_TOKEN?.trim()
+const ionAccessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJiY2FhZDJlMC1iZDc5LTQ5YjUtYTNkYi1lZWVlMDNhNDQyYWMiLCJpZCI6MzU1OTQ2LCJpYXQiOjE3NjE5NDcwMzJ9.3sCHeaiKInj6GaYdig82w-rGx0RNTKPbVdIY3c6XW10"
 
 type CesiumViewerProps = {
   onReady: (viewer: Viewer | null) => void
