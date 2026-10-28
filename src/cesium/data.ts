@@ -24,18 +24,19 @@ const treeCylinderSegments = 16
 
 type ViewBounds = { north: number; south: number; east: number; west: number }
 type DEMChunk = { file: string; bounds: ViewBounds }
-type DEMChunksIndex = { chunks: DEMChunk[] }
-type DEMVertex = [easting: number, northing: number, elevation: number]
+type DEMChunksIndex = {
+  chunks: DEMChunk[]
+  mesh_coordinate_system?: string
+  mesh_format?: "obj" | "caldem2-v1"
+}
+type DEMVertex = [longitude: number, latitude: number, elevation: number]
 type DEMMesh = {
   file: string
   bounds: ViewBounds
   vertices: DEMVertex[]
   faces: number[][]
+  grid?: { columns: number; rows: number }
   anchor: Cartographic
-  minEasting: number
-  minNorthing: number
-  eastWestSpan: number
-  northSouthSpan: number
 }
 type PositionedDEMMesh = DEMMesh & { elevationOffset: number }
 type Coordinate = [number, number, number?]
@@ -115,7 +116,7 @@ async function loadDetailedFeatures(viewer: Viewer) {
   return featureLists.flat()
 }
 
-function parseDEMObj(file: string, bounds: ViewBounds, text: string): DEMMesh {
+function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenced: boolean): DEMMesh {
   const vertices: DEMVertex[] = []
   const faces: number[][] = []
 
@@ -126,7 +127,9 @@ function parseDEMObj(file: string, bounds: ViewBounds, text: string): DEMMesh {
       if (vertex.length !== 3 || vertex.some((value) => !Number.isFinite(value))) {
         throw new Error(`Invalid vertex in DEM chunk ${file}.`)
       }
-      vertices.push([vertex[0], vertex[1], vertex[2]])
+      vertices.push(georeferenced
+        ? [vertex[0], vertex[2], vertex[1]]
+        : [vertex[0], vertex[1], vertex[2]])
     } else if (parts[0] === "f") {
       const face = parts.slice(1).map((part) => {
         const index = Number.parseInt(part.split("/")[0], 10)
@@ -143,21 +146,86 @@ function parseDEMObj(file: string, bounds: ViewBounds, text: string): DEMMesh {
   }
 
   if (!vertices.length || !faces.length) throw new Error(`DEM chunk ${file} has no usable mesh.`)
-  const minEasting = Math.min(...vertices.map(([easting]) => easting))
-  const maxEasting = Math.max(...vertices.map(([easting]) => easting))
-  const minNorthing = Math.min(...vertices.map(([, northing]) => northing))
-  const maxNorthing = Math.max(...vertices.map(([, northing]) => northing))
-  const eastWestSpan = maxEasting - minEasting
-  const northSouthSpan = maxNorthing - minNorthing
-  if (eastWestSpan <= 0 || northSouthSpan <= 0) throw new Error(`DEM chunk ${file} has invalid horizontal bounds.`)
+  let anchorLongitude: number
+  let anchorLatitude: number
 
-  const [anchorEasting, anchorNorthing] = vertices[0]
-  const anchor = Cartographic.fromDegrees(
-    bounds.west + ((anchorEasting - minEasting) / eastWestSpan) * (bounds.east - bounds.west),
-    bounds.south + ((anchorNorthing - minNorthing) / northSouthSpan) * (bounds.north - bounds.south),
-  )
+  if (georeferenced) {
+    [anchorLongitude, anchorLatitude] = vertices[0]
+  } else {
+    const longitudes = vertices.map(([longitude]) => longitude)
+    const latitudes = vertices.map(([, latitude]) => latitude)
+    const minEasting = Math.min(...longitudes)
+    const maxEasting = Math.max(...longitudes)
+    const minNorthing = Math.min(...latitudes)
+    const maxNorthing = Math.max(...latitudes)
+    const eastWestSpan = maxEasting - minEasting
+    const northSouthSpan = maxNorthing - minNorthing
+    if (eastWestSpan <= 0 || northSouthSpan <= 0) throw new Error(`DEM chunk ${file} has invalid horizontal bounds.`)
 
-  return { file, bounds, vertices, faces, anchor, minEasting, minNorthing, eastWestSpan, northSouthSpan }
+    const [anchorEasting, anchorNorthing] = vertices[0]
+    anchorLongitude = bounds.west + ((anchorEasting - minEasting) / eastWestSpan) * (bounds.east - bounds.west)
+    anchorLatitude = bounds.south + ((anchorNorthing - minNorthing) / northSouthSpan) * (bounds.north - bounds.south)
+    vertices.forEach((vertex, index) => {
+      vertices[index] = [
+        bounds.west + ((vertex[0] - minEasting) / eastWestSpan) * (bounds.east - bounds.west),
+        bounds.south + ((vertex[1] - minNorthing) / northSouthSpan) * (bounds.north - bounds.south),
+        vertex[2],
+      ]
+    })
+  }
+
+  const anchor = Cartographic.fromDegrees(anchorLongitude, anchorLatitude)
+  return { file, bounds, vertices, faces, anchor }
+}
+
+function parseCaldem2(file: string, bounds: ViewBounds, data: ArrayBuffer): DEMMesh {
+  const headerSize = 60
+  const bytesPerVertex = 12
+  if (data.byteLength < headerSize) throw new Error(`DEM chunk ${file} is truncated.`)
+
+  const header = new Uint8Array(data, 0, headerSize)
+  const magic = String.fromCharCode(...header.slice(0, 8))
+  const view = new DataView(data)
+  if (magic !== "CALDEM2\0") throw new Error(`DEM chunk ${file} has an invalid format.`)
+  if (view.getUint32(8, true) !== 1) throw new Error(`DEM chunk ${file} uses an unsupported format version.`)
+
+  const columns = view.getUint32(12, true)
+  const rows = view.getUint32(16, true)
+  const vertexCount = view.getUint32(20, true)
+  if (!columns || !rows || vertexCount !== columns * rows) {
+    throw new Error(`DEM chunk ${file} has invalid grid dimensions.`)
+  }
+  const expectedByteLength = headerSize + vertexCount * bytesPerVertex
+  if (data.byteLength !== expectedByteLength) {
+    throw new Error(`DEM chunk ${file} has invalid data length.`)
+  }
+
+  const positionData = new Float32Array(data, headerSize, vertexCount * 3)
+  const vertices: DEMVertex[] = []
+  for (let index = 0; index < positionData.length; index += 3) {
+    const longitude = positionData[index]
+    const latitude = positionData[index + 1]
+    const elevation = positionData[index + 2]
+    if (![longitude, latitude, elevation].every(Number.isFinite)) {
+      throw new Error(`DEM chunk ${file} contains invalid vertices.`)
+    }
+    vertices.push([longitude, latitude, elevation])
+  }
+
+  const [anchorLongitude, anchorLatitude] = vertices[0]
+  if (anchorLongitude < bounds.west || anchorLongitude > bounds.east ||
+      anchorLatitude < bounds.south || anchorLatitude > bounds.north) {
+    throw new Error(`DEM chunk ${file} has coordinates outside its indexed bounds.`)
+  }
+
+  return {
+    file,
+    bounds,
+    vertices,
+    faces: [],
+    grid: { columns, rows },
+    anchor: Cartographic.fromDegrees(anchorLongitude, anchorLatitude),
+  }
 }
 
 async function loadDEMMeshes(viewer: Viewer, bounds: ViewBounds): Promise<PositionedDEMMesh[]> {
@@ -165,10 +233,14 @@ async function loadDEMMeshes(viewer: Viewer, bounds: ViewBounds): Promise<Positi
   const chunks = index.chunks.filter((chunk) => overlaps(chunk.bounds, bounds))
   if (!chunks.length) throw new Error("No DEM chunks found in the current view.")
 
+  const binaryFormat = index.mesh_format === "caldem2-v1"
+  const georeferenced = index.mesh_coordinate_system === "EPSG:4326"
   const meshes = await Promise.all(chunks.map(async ({ file, bounds: chunkBounds }) => {
     const response = await fetch(`${demChunksBaseUrl}${file}`)
     if (!response.ok) throw new Error(`Request failed (${response.status}): ${file}`)
-    return parseDEMObj(file, chunkBounds, await response.text())
+    return binaryFormat
+      ? parseCaldem2(file, chunkBounds, await response.arrayBuffer())
+      : parseDEMObj(file, chunkBounds, await response.text(), georeferenced)
   }))
 
   if (viewer.terrainProvider instanceof EllipsoidTerrainProvider) {
@@ -185,9 +257,15 @@ async function loadDEMMeshes(viewer: Viewer, bounds: ViewBounds): Promise<Positi
     throw new Error("Could not determine terrain height for some DEM chunks. Wait for terrain to load and try again.")
   }
 
-  return meshes.map((mesh, index) => ({
+  const offsets = meshes.map((mesh, index) => sampledPositions[index].height - mesh.vertices[0][2])
+  const sortedOffsets = offsets.slice().sort((a, b) => a - b)
+  const elevationOffset = sortedOffsets.length % 2
+    ? sortedOffsets[Math.floor(sortedOffsets.length / 2)]
+    : (sortedOffsets[sortedOffsets.length / 2 - 1] + sortedOffsets[sortedOffsets.length / 2]) / 2
+
+  return meshes.map((mesh) => ({
     ...mesh,
-    elevationOffset: sampledPositions[index].height - mesh.vertices[0][2],
+    elevationOffset,
   }))
 }
 
@@ -389,23 +467,39 @@ function appendDEMMeshes(lines: string[], meshes: PositionedDEMMesh[], origin: [
   let vertexIndex = firstVertexIndex
   meshes.forEach((mesh) => {
     lines.push(`o terrain_${mesh.file.replace(/[^a-zA-Z0-9_-]/g, "_")}`)
-    mesh.vertices.forEach(([easting, northing, elevation]) => {
-      const longitude = mesh.bounds.west + ((easting - mesh.minEasting) / mesh.eastWestSpan) * (mesh.bounds.east - mesh.bounds.west)
-      const latitude = mesh.bounds.south + ((northing - mesh.minNorthing) / mesh.northSouthSpan) * (mesh.bounds.north - mesh.bounds.south)
+    mesh.vertices.forEach(([longitude, latitude, elevation]) => {
       const local = toLocalMeters(longitude, latitude, origin)
       lines.push(`v ${local.x.toFixed(3)} ${(elevation + mesh.elevationOffset).toFixed(3)} ${local.z.toFixed(3)}`)
     })
-    mesh.faces.forEach((face) => {
-      lines.push(`f ${face.map((index) => vertexIndex + index).join(" ")}`)
-    })
+    if (mesh.grid) {
+      const { columns, rows } = mesh.grid
+      for (let row = 0; row < rows - 1; row++) {
+        for (let column = 0; column < columns - 1; column++) {
+          const a = vertexIndex + row * columns + column
+          const b = a + 1
+          const c = a + columns
+          const d = c + 1
+          lines.push(`f ${a} ${b} ${d}`)
+          lines.push(`f ${a} ${d} ${c}`)
+        }
+      }
+    } else {
+      mesh.faces.forEach((face) => {
+        lines.push(`f ${face.map((index) => vertexIndex + index).join(" ")}`)
+      })
+    }
     vertexIndex += mesh.vertices.length
   })
 }
+// -------------------- OBJ EXPORT --------------------
 
-function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMeshes: PositionedDEMMesh[]) {
+function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMeshes: PositionedDEMMesh[], bounds: ViewBounds) {
   const firstRing = features.flatMap(getAllRings).find((ring) => ring.length)
-  if (!firstRing) throw new Error("No detailed buildings found in the current view.")
-  const origin: [number, number] = [firstRing[0][0], firstRing[0][1]]
+  const origin: [number, number] = firstRing
+    ? [firstRing[0][0], firstRing[0][1]]
+    : trees[0]
+      ? [trees[0].longitude, trees[0].latitude]
+      : [(bounds.west + bounds.east) / 2, (bounds.south + bounds.north) / 2]
   const lines = ["# Calgary 3D Buildings", "# Coordinates are local metres: X=East, Y=Up, Z=North", `# Origin: ${origin[0].toFixed(6)}, ${origin[1].toFixed(6)}`, ""]
   let vertexIndex = 1
 
@@ -453,10 +547,9 @@ function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMesh
 export async function exportBuildingsObj(viewer: Viewer) {
   const bounds = getViewBounds(viewer)
   const features = await loadDetailedFeatures(viewer)
-  if (!features.length) throw new Error("No detailed buildings found in the current view.")
   const trees = await fetchTreesInView(viewer)
   const treesAtGround = await sampleTreeGroundHeights(viewer, trees)
   const terrainMeshes = await loadDEMMeshes(viewer, bounds)
-  saveObj(features, treesAtGround, terrainMeshes)
+  saveObj(features, treesAtGround, terrainMeshes, bounds)
   return { buildingCount: features.length, treeCount: treesAtGround.length, terrainChunkCount: terrainMeshes.length }
 }
