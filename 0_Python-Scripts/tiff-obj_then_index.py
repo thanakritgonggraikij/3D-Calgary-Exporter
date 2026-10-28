@@ -15,8 +15,8 @@ from rasterio.fill import fillnodata
 from rasterio.warp import transform, transform_bounds
 
 # TESTING DIRECTORIES
-# INPUT_DIR = Path("/Users/grisgonggraikij/Documents/GitHub/3D-Calgary-Exporter/QGIS/QGIS-gdb-to-geojson/DEM/DEM2m_800m_retiled/")
-INPUT_DIR = Path("/Users/grisgonggraikij/Documents/GitHub/3D-Calgary-Exporter/QGIS/QGIS-gdb-to-geojson/DEM/TESTS/TIF")
+INPUT_DIR = Path("/Users/grisgonggraikij/Documents/GitHub/3D-Calgary-Exporter/QGIS/QGIS-gdb-to-geojson/DEM/DEM2m_800m_retiled/")
+# INPUT_DIR = Path("/Users/grisgonggraikij/Documents/GitHub/3D-Calgary-Exporter/QGIS/QGIS-gdb-to-geojson/DEM/TESTS/TIF")
 OUTPUT_DIR = Path("/Users/grisgonggraikij/Documents/GitHub/3D-Calgary-Exporter/QGIS/QGIS-gdb-to-geojson/DEM/DEM2m_800m_chunks_obj/")
 
 OUTPUT_FILE = OUTPUT_DIR / "chunks_index.json"

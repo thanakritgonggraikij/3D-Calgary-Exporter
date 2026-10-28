@@ -22,12 +22,13 @@ Without a token, the app opens a globe centered on Calgary using ellipsoid terra
 
 ## Current data controls
 
-- **Load Trees (API)** requests City of Calgary tree points in the current camera view and displays them as Cesium point entities.
-- **Load Buildings In View** reads the existing detailed building chunks for the camera view and displays them as simple Cesium extrusions for a lightweight preview.
-- **Load DEM Extent** draws the indexed DEM chunk footprints that intersect the current view without downloading their OBJ meshes.
-- **Export Buildings, Trees & DEM OBJ** combines detailed building geometry, capped 5 m tall and 0.25 m radius tree cylinders, and DEM chunk meshes intersecting the current view. DEM chunks are positioned from their indexed geographic bounds; their relative heights are aligned to sampled Cesium terrain. Buildings and trees are rigidly translated vertically to the highest 2 m DEM sample under their footprints, so they sit on the surface without deforming their shape. If no DEM covers an object, it remains exportable and is placed at the lowest point of the generated OBJ (local elevation `0`). This export requires a non-ellipsoid Cesium terrain provider, normally enabled with a Cesium ion token.
+- **Select export area** is a fixed 2.4 km square around a globe point. Click the globe to move the highlighted gold selection independently of camera zoom and position. The app loads every 800 m chunk whose bounds intersect the selected square.
+- **Load Buildings in Selection** reads only complete 800 m detailed building chunks contained within the fixed area and displays them as simple Cesium extrusions for a lightweight preview.
+- **Load DEM Selection Extents** draws every indexed DEM chunk intersecting the fixed area without downloading its binary mesh.
+- **Load Trees in Selection** requests City of Calgary trees within the fixed selection and displays them as Cesium point entities. Tree inclusion also uses spatial intersection with the selected area.
+- **Export Buildings, Trees & DEM OBJ** combines detailed building geometry, capped 5 m tall and 0.25 m radius tree cylinders, and the selected nine-chunk DEM area. DEM chunks are positioned from their indexed geographic bounds; their relative heights are aligned to sampled Cesium terrain. Buildings and trees are rigidly translated vertically to the highest 2 m DEM sample under their footprints, so they sit on the surface without deforming their shape. If no DEM covers an object, it remains exportable and is placed at the lowest point of the generated OBJ (local elevation `0`). This export requires a non-ellipsoid Cesium terrain provider, normally enabled with a Cesium ion token.
 
-These controls use Cesium's camera view rectangle; they no longer rely on Mapbox bounds or Mapbox rendering layers.
+These controls use an explicit globe-selection point; they no longer rely on viewport bounds or Mapbox rendering layers.
 
 ## Why this scaffold
 

@@ -4,7 +4,6 @@ import {
   Color,
   EllipsoidTerrainProvider,
   HeightReference,
-  Math as CesiumMath,
   PolygonHierarchy,
   Rectangle,
   sampleTerrain,
@@ -21,8 +20,10 @@ const demExtentEntityPrefix = "calgary-dem-extent-"
 const treeHeightMeters = 5
 const treeRadiusMeters = 0.25
 const treeCylinderSegments = 16
+const selectionRadiusMeters = 1200
 
 type ViewBounds = { north: number; south: number; east: number; west: number }
+export type MapSelection = { longitude: number; latitude: number }
 type DEMChunk = { file: string; bounds: ViewBounds }
 type DEMChunksIndex = {
   chunks: DEMChunk[]
@@ -63,19 +64,38 @@ let chunksIndexPromise: Promise<ChunksIndex> | undefined
 let demChunksIndexPromise: Promise<DEMChunksIndex> | undefined
 const chunkCache = new Map<string, BuildingFeature[]>()
 
-function getViewBounds(viewer: Viewer): ViewBounds {
-  const rectangle = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid)
-  if (!rectangle) throw new Error("Could not determine the current map view. Zoom in to an area and try again.")
+export function getSelectionBounds(selection: MapSelection): ViewBounds {
+  const radians = Math.PI / 180
+  const latitudeRadius = selectionRadiusMeters / 111320
+  const longitudeRadius = selectionRadiusMeters / (111320 * Math.max(Math.cos(selection.latitude * radians), 0.1))
   return {
-    north: CesiumMath.toDegrees(rectangle.north),
-    south: CesiumMath.toDegrees(rectangle.south),
-    east: CesiumMath.toDegrees(rectangle.east),
-    west: CesiumMath.toDegrees(rectangle.west),
+    north: selection.latitude + latitudeRadius,
+    south: selection.latitude - latitudeRadius,
+    east: selection.longitude + longitudeRadius,
+    west: selection.longitude - longitudeRadius,
   }
 }
 
-function overlaps(a: ViewBounds, b: ViewBounds) {
-  return !(a.east < b.west || a.west > b.east || a.north < b.south || a.south > b.north)
+function getIntersectingChunks<T extends { bounds: ViewBounds }>(chunks: T[], selection: MapSelection): T[] {
+  const selectionBounds = getSelectionBounds(selection)
+  const intersectingChunks = chunks.filter((chunk) =>
+    chunk.bounds.east >= selectionBounds.west && chunk.bounds.west <= selectionBounds.east &&
+    chunk.bounds.north >= selectionBounds.south && chunk.bounds.south <= selectionBounds.north,
+  )
+
+  if (!intersectingChunks.length) throw new Error("The selected location is outside the available data coverage.")
+  return intersectingChunks
+}
+
+function getContainedChunks<T extends { bounds: ViewBounds }>(chunks: T[], selection: MapSelection): T[] {
+  const selectionBounds = getSelectionBounds(selection)
+  const containedChunks = chunks.filter((chunk) =>
+    chunk.bounds.west >= selectionBounds.west && chunk.bounds.east <= selectionBounds.east &&
+    chunk.bounds.south >= selectionBounds.south && chunk.bounds.north <= selectionBounds.north,
+  )
+
+  if (!containedChunks.length) throw new Error("The selected area is outside the available data coverage.")
+  return containedChunks
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -100,10 +120,9 @@ async function getDEMChunksIndex() {
   return demChunksIndexPromise
 }
 
-async function loadDetailedFeatures(viewer: Viewer) {
-  const bounds = getViewBounds(viewer)
+async function loadDetailedFeatures(selection: MapSelection) {
   const index = await getChunksIndex()
-  const chunks = index.chunks.filter((chunk) => overlaps(chunk.bounds, bounds))
+  const chunks = getContainedChunks(index.chunks, selection)
   const featureLists = await Promise.all(chunks.map(async ({ file }) => {
     let features = chunkCache.get(file)
     if (!features) {
@@ -228,9 +247,9 @@ function parseCaldem2(file: string, bounds: ViewBounds, data: ArrayBuffer): DEMM
   }
 }
 
-async function loadDEMMeshes(viewer: Viewer, bounds: ViewBounds): Promise<PositionedDEMMesh[]> {
+async function loadDEMMeshes(viewer: Viewer, selection: MapSelection): Promise<PositionedDEMMesh[]> {
   const index = await getDEMChunksIndex()
-  const chunks = index.chunks.filter((chunk) => overlaps(chunk.bounds, bounds))
+  const chunks = getIntersectingChunks(index.chunks, selection)
   if (!chunks.length) throw new Error("No DEM chunks found in the current view.")
 
   const binaryFormat = index.mesh_format === "caldem2-v1"
@@ -269,10 +288,9 @@ async function loadDEMMeshes(viewer: Viewer, bounds: ViewBounds): Promise<Positi
   }))
 }
 
-export async function loadDEMExtent(viewer: Viewer) {
-  const bounds = getViewBounds(viewer)
+export async function loadDEMExtent(viewer: Viewer, selection: MapSelection) {
   const index = await getDEMChunksIndex()
-  const chunks = index.chunks.filter((chunk) => overlaps(chunk.bounds, bounds))
+  const chunks = getIntersectingChunks(index.chunks, selection)
 
   viewer.entities.values
     .filter((entity) => entity.id.startsWith(demExtentEntityPrefix))
@@ -301,8 +319,8 @@ export async function loadDEMExtent(viewer: Viewer) {
   return chunks.length
 }
 
-async function fetchTreesInView(viewer: Viewer) {
-  const bounds = getViewBounds(viewer)
+async function fetchTreesInArea(selection: MapSelection) {
+  const bounds = getSelectionBounds(selection)
   const params = new URLSearchParams({
     "$where": `within_box(point, ${bounds.north}, ${bounds.west}, ${bounds.south}, ${bounds.east})`,
     "$limit": "2000",
@@ -333,8 +351,8 @@ async function sampleTreeGroundHeights(viewer: Viewer, trees: TreeInView[]): Pro
   return trees.map((tree, index) => ({ ...tree, ground: sampledPositions[index].height }))
 }
 
-export async function loadTreesInView(viewer: Viewer) {
-  const trees = await fetchTreesInView(viewer)
+export async function loadTreesInArea(viewer: Viewer, selection: MapSelection) {
+  const trees = await fetchTreesInArea(selection)
   const treesAtGround = await sampleTreeGroundHeights(viewer, trees)
 
   viewer.entities.values
@@ -376,8 +394,8 @@ function getGroundAndFallbackRoof(feature: BuildingFeature, rings: Coordinate[][
   return { ground, fallbackRoof: Math.max(roof, ground + 3) }
 }
 
-export async function loadBuildingsInView(viewer: Viewer) {
-  const features = await loadDetailedFeatures(viewer)
+export async function loadBuildingsInArea(viewer: Viewer, selection: MapSelection) {
+  const features = await loadDetailedFeatures(selection)
   viewer.entities.values
     .filter((entity) => entity.id.startsWith(buildingEntityPrefix))
     .forEach((entity) => viewer.entities.remove(entity))
@@ -605,12 +623,12 @@ function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMesh
   URL.revokeObjectURL(url)
 }
 
-export async function exportBuildingsObj(viewer: Viewer) {
-  const bounds = getViewBounds(viewer)
-  const features = await loadDetailedFeatures(viewer)
-  const trees = await fetchTreesInView(viewer)
+export async function exportBuildingsObj(viewer: Viewer, selection: MapSelection) {
+  const bounds = getSelectionBounds(selection)
+  const features = await loadDetailedFeatures(selection)
+  const trees = await fetchTreesInArea(selection)
   const treesAtGround = await sampleTreeGroundHeights(viewer, trees)
-  const terrainMeshes = await loadDEMMeshes(viewer, bounds)
+  const terrainMeshes = await loadDEMMeshes(viewer, selection)
   saveObj(features, treesAtGround, terrainMeshes, bounds)
   return { buildingCount: features.length, treeCount: treesAtGround.length, terrainChunkCount: terrainMeshes.length }
 }
