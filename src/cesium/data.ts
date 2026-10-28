@@ -408,6 +408,47 @@ export async function loadBuildingsInView(viewer: Viewer) {
   return count
 }
 
+type DEMSurface = (longitude: number, latitude: number) => number | undefined
+
+function createDEMPointSampler(meshes: PositionedDEMMesh[]): DEMSurface {
+  return (longitude, latitude) => {
+    const bestMatch = meshes.find((mesh) =>
+      longitude >= mesh.bounds.west && longitude <= mesh.bounds.east &&
+      latitude >= mesh.bounds.south && latitude <= mesh.bounds.north)
+
+    if (!bestMatch) return undefined
+
+    if (bestMatch.grid) {
+      const { columns, rows } = bestMatch.grid
+      const horizontal = (longitude - bestMatch.bounds.west) / (bestMatch.bounds.east - bestMatch.bounds.west) * (columns - 1)
+      const vertical = (bestMatch.bounds.north - latitude) / (bestMatch.bounds.north - bestMatch.bounds.south) * (rows - 1)
+      const column = Math.max(0, Math.min(columns - 2, Math.floor(horizontal)))
+      const row = Math.max(0, Math.min(rows - 2, Math.floor(vertical)))
+      const columnFraction = horizontal - column
+      const rowFraction = vertical - row
+      const elevationAt = (sampleRow: number, sampleColumn: number) => {
+        const index = sampleRow * columns + sampleColumn
+        const [, , elevation] = bestMatch!.vertices[index]
+        return elevation + bestMatch!.elevationOffset
+      }
+      const top = elevationAt(row, column) * (1 - columnFraction) + elevationAt(row, column + 1) * columnFraction
+      const bottom = elevationAt(row + 1, column) * (1 - columnFraction) + elevationAt(row + 1, column + 1) * columnFraction
+      return top * (1 - rowFraction) + bottom * rowFraction
+    }
+
+    let nearestElevation: number | undefined
+    let nearestDistance = Number.POSITIVE_INFINITY
+    for (const [sampleLongitude, sampleLatitude, elevation] of bestMatch.vertices) {
+      const distance = (sampleLongitude - longitude) ** 2 + (sampleLatitude - latitude) ** 2
+      if (distance < nearestDistance) {
+        nearestDistance = distance
+        nearestElevation = elevation + bestMatch.elevationOffset
+      }
+    }
+    return nearestElevation
+  }
+}
+
 function toLocalMeters(longitude: number, latitude: number, origin: [number, number]) {
   const radians = Math.PI / 180
   const latitudeRadians = origin[1] * radians
@@ -422,12 +463,26 @@ function toLocalMeters(longitude: number, latitude: number, origin: [number, num
   }
 }
 
-function appendTreeCylinders(lines: string[], trees: TreeAtGround[], origin: [number, number], firstVertexIndex: number) {
+function appendTreeCylinders(lines: string[], trees: TreeAtGround[], origin: [number, number], firstVertexIndex: number, sampleTerrain: DEMSurface) {
   let vertexIndex = firstVertexIndex
   const angleStep = (Math.PI * 2) / treeCylinderSegments
 
-  trees.forEach(({ tree, index, longitude, latitude, ground }) => {
+  trees.forEach(({ tree, index, longitude, latitude }) => {
     const local = toLocalMeters(longitude, latitude, origin)
+    const latitudeRadians = latitude * Math.PI / 180
+    const flattening = 1 / 298.257223563
+    const eccentricitySquared = flattening * (2 - flattening)
+    const denominator = 1 - eccentricitySquared * Math.sin(latitudeRadians) ** 2
+    const metresPerDegreeLongitude = Math.PI / 180 * 6378137 * Math.cos(latitudeRadians)
+    const metresPerDegreeLatitude = Math.PI / 180 * 6378137 * (1 - eccentricitySquared) / denominator ** 1.5
+    const groundSamples = [sampleTerrain(longitude, latitude), ...Array.from({ length: treeCylinderSegments }, (_, segment) => {
+      const angle = segment * angleStep
+      return sampleTerrain(
+        longitude + treeRadiusMeters * Math.cos(angle) / metresPerDegreeLongitude,
+        latitude + treeRadiusMeters * Math.sin(angle) / metresPerDegreeLatitude,
+      )
+    })].filter((elevation): elevation is number => elevation !== undefined)
+    const ground = groundSamples.length ? Math.max(...groundSamples) : 0
     const bottomCenter = vertexIndex++
     lines.push(`o tree_${tree[":id"] ?? index}`)
     lines.push(`v ${local.x.toFixed(3)} ${ground.toFixed(3)} ${local.z.toFixed(3)}`)
@@ -503,9 +558,15 @@ function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMesh
   const lines = ["# Calgary 3D Buildings", "# Coordinates are local metres: X=East, Y=Up, Z=North", `# Origin: ${origin[0].toFixed(6)}, ${origin[1].toFixed(6)}`, ""]
   let vertexIndex = 1
 
+  const sampleTerrain = createDEMPointSampler(terrainMeshes)
   features.forEach((feature, buildingIndex) => {
     const rings = getAllRings(feature)
     const { ground, fallbackRoof } = getGroundAndFallbackRoof(feature, rings)
+    const footprintSamples = rings.flatMap((ring) => ring.slice(0, -1)
+      .map(([longitude, latitude]) => sampleTerrain(longitude, latitude)))
+      .filter((elevation): elevation is number => elevation !== undefined)
+    const terrainElevation = footprintSamples.length ? Math.max(...footprintSamples) : ground
+    const verticalOffset = terrainElevation - ground
     lines.push(`o building_${buildingIndex + 1}`)
     rings.forEach((ring) => {
       const points = ring.slice(0, -1)
@@ -513,12 +574,12 @@ function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMesh
       const start = vertexIndex
       points.forEach(([longitude, latitude]) => {
         const local = toLocalMeters(longitude, latitude, origin)
-        lines.push(`v ${local.x.toFixed(3)} ${ground.toFixed(3)} ${local.z.toFixed(3)}`)
+        lines.push(`v ${local.x.toFixed(3)} ${(ground + verticalOffset).toFixed(3)} ${local.z.toFixed(3)}`)
       })
       points.forEach(([longitude, latitude, elevation]) => {
         const local = toLocalMeters(longitude, latitude, origin)
         const roof = typeof elevation === "number" && Number.isFinite(elevation) ? elevation : fallbackRoof
-        lines.push(`v ${local.x.toFixed(3)} ${roof.toFixed(3)} ${local.z.toFixed(3)}`)
+        lines.push(`v ${local.x.toFixed(3)} ${(roof + verticalOffset).toFixed(3)} ${local.z.toFixed(3)}`)
       })
       for (let index = 1; index < points.length - 1; index++) {
         lines.push(`f ${start} ${start + index} ${start + index + 1}`)
@@ -532,7 +593,7 @@ function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMesh
     })
   })
 
-  const nextVertexIndex = appendTreeCylinders(lines, trees, origin, vertexIndex)
+  const nextVertexIndex = appendTreeCylinders(lines, trees, origin, vertexIndex, sampleTerrain)
   appendDEMMeshes(lines, terrainMeshes, origin, nextVertexIndex)
 
   const blob = new Blob([`${lines.join("\n")}\n`], { type: "text/plain" })
