@@ -2,9 +2,20 @@ import * as L from "leaflet"
 import type { Map as LeafletMap } from "leaflet"
 
 const treesApi = "https://data.calgary.ca/resource/tfs4-3wwa.json"
-const roadsApi = "https://overpass-api.de/api/interpreter"
+const roadsGeoJsonBaseUrl = "https://pub-a06088b43d4e4619a6b98a66771604cf.r2.dev/"
 const chunksBaseUrl = "https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_chunks/"
 const demChunksBaseUrl = "https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_chunks/"
+const roadGeoJsonFiles = [
+  { file: "1_OSMhighway_primary.geojson", highway: "primary" },
+  { file: "2_OSMhighway_secondary.geojson", highway: "secondary" },
+  { file: "3_OSMhighway_tertiary.geojson", highway: "tertiary" },
+  { file: "4_OSMhighway_trunk.geojson", highway: "trunk" },
+  { file: "5_OSMhighway_motorway.geojson", highway: "motorway" },
+  { file: "6_OSMhighway_residential.geojson", highway: "residential" },
+  { file: "7_OSMhighway_service.geojson", highway: "service" },
+  { file: "8_OSMhighway_unclassified.geojson", highway: "unclassified" },
+  { file: "9_OSMhighway_foot-other.geojson", highway: "path" },
+] as const
 const treeHeightMeters = 5
 const treeRadiusMeters = 0.25
 const treeCylinderSegments = 16
@@ -46,16 +57,24 @@ type TreeRecord = {
 }
 type TreeInView = { tree: TreeRecord; index: number; longitude: number; latitude: number }
 type TreeAtGround = TreeInView & { ground: number }
+type RoadPosition = [longitude: number, latitude: number, elevation?: number]
 type Road = {
-  id: number
+  id: string
   highway: string
   name?: string
-  coordinates: [latitude: number, longitude: number][]
+  coordinates: [latitude: number, longitude: number][][]
+}
+type RoadFeature = {
+  id?: string | number
+  properties?: Record<string, unknown>
+  geometry?: { type: string; coordinates: unknown }
 }
 
 let chunksIndexPromise: Promise<ChunksIndex> | undefined
 let demChunksIndexPromise: Promise<DEMChunksIndex> | undefined
 const chunkCache = new Map<string, BuildingFeature[]>()
+const roadFileTextCache = new Map<string, Promise<string>>()
+const roadSelectionCache = new Map<string, Promise<Road[]>>()
 type MapOverlays = { trees: L.LayerGroup; buildings: L.LayerGroup; demExtents: L.LayerGroup; roads: L.LayerGroup }
 const mapOverlays = new WeakMap<LeafletMap, MapOverlays>()
 
@@ -301,51 +320,119 @@ async function fetchTreesInArea(selection: MapSelection, signal?: AbortSignal) {
   })
 }
 
+function isRoadPosition(value: unknown): value is RoadPosition {
+  return Array.isArray(value) && value.length >= 2 &&
+    typeof value[0] === "number" && Number.isFinite(value[0]) &&
+    typeof value[1] === "number" && Number.isFinite(value[1])
+}
+
+function getRoadCoordinatePaths(geometry: RoadFeature["geometry"]): [number, number][][] {
+  if (!geometry) return []
+  let rawPaths: unknown[]
+  if (geometry.type === "LineString") {
+    rawPaths = [geometry.coordinates]
+  } else if (geometry.type === "MultiLineString" || geometry.type === "Polygon") {
+    rawPaths = Array.isArray(geometry.coordinates) ? geometry.coordinates : []
+  } else if (geometry.type === "MultiPolygon" && Array.isArray(geometry.coordinates)) {
+    rawPaths = geometry.coordinates.flatMap((polygon) => Array.isArray(polygon) ? polygon : [])
+  } else {
+    return []
+  }
+
+  return rawPaths.flatMap((rawPath): [number, number][][] => {
+    if (!Array.isArray(rawPath) || rawPath.length < 2 || !rawPath.every(isRoadPosition)) return []
+    return [rawPath.map(([longitude, latitude]) => [latitude, longitude])]
+  })
+}
+
+async function parseRoadFeatures(
+  value: unknown,
+  fallbackHighway: string,
+  file: string,
+  bounds: ViewBounds,
+  signal?: AbortSignal,
+): Promise<Road[]> {
+  if (typeof value !== "object" || value === null || !("features" in value) || !Array.isArray(value.features)) {
+    throw new Error(`Road data file ${file} is not a valid GeoJSON FeatureCollection.`)
+  }
+
+  const roads: Road[] = []
+  for (const [index, feature] of value.features.entries()) {
+    if (index > 0 && index % 10000 === 0) await yieldToBrowser(signal)
+    if (typeof feature !== "object" || feature === null) continue
+    const roadFeature = feature as RoadFeature
+    const coordinates = getRoadCoordinatePaths(roadFeature.geometry)
+      .flatMap((path) => clipRoadPath(path, bounds))
+    if (!coordinates.length) continue
+    const properties = roadFeature.properties
+    const id = typeof roadFeature.id === "string" || typeof roadFeature.id === "number"
+      ? String(roadFeature.id)
+      : typeof properties?.["@id"] === "string"
+        ? properties["@id"]
+        : `${file}-${index + 1}`
+    roads.push({
+      id,
+      highway: typeof properties?.highway === "string" ? properties.highway : fallbackHighway,
+      name: typeof properties?.name === "string" ? properties.name : undefined,
+      coordinates,
+    })
+  }
+  return roads
+}
+
+function loadRoadFileText(file: string, signal?: AbortSignal): Promise<string> {
+  const cached = roadFileTextCache.get(file)
+  if (cached) return cached
+
+  const request = fetch(`${roadsGeoJsonBaseUrl}${file}`, { signal })
+    .catch((error: unknown) => {
+      if (signal?.aborted) throw error
+      throw new Error(`Could not load road data file ${file}. Check the R2 public URL and bucket CORS settings.`, { cause: error })
+    })
+    .then((response) => {
+      if (!response.ok) throw new Error(`Road data request failed (${response.status}): ${file}`)
+      return response.text()
+    })
+  roadFileTextCache.set(file, request)
+  void request.catch(() => {
+    if (roadFileTextCache.get(file) === request) roadFileTextCache.delete(file)
+  })
+  return request
+}
+
 async function fetchRoadsInArea(selection: MapSelection, signal?: AbortSignal): Promise<Road[]> {
   const bounds = getSelectionBounds(selection)
-  const query = `[out:json][timeout:25];way["highway"](${bounds.south},${bounds.west},${bounds.north},${bounds.east});out geom;`
-  const response = await fetch(roadsApi, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-    body: new URLSearchParams({ data: query }),
-    signal,
-  })
-  if (!response.ok) throw new Error(`OpenStreetMap road request failed (${response.status}).`)
+  const selectionKey = `${bounds.south},${bounds.west},${bounds.north},${bounds.east}`
+  signal?.throwIfAborted()
+  const cached = roadSelectionCache.get(selectionKey)
+  if (cached) return cached
 
-  const result: unknown = await response.json()
-  if (typeof result !== "object" || result === null || !("elements" in result) || !Array.isArray(result.elements)) {
-    throw new Error("OpenStreetMap returned an invalid road response.")
-  }
-  if ("remark" in result && typeof result.remark === "string" && result.remark) {
-    throw new Error(`OpenStreetMap road request failed: ${result.remark}`)
-  }
-
-  return result.elements.flatMap((element): Road[] => {
-    if (typeof element !== "object" || element === null || !("type" in element) || element.type !== "way" ||
-        !("id" in element) || typeof element.id !== "number" ||
-        !("tags" in element) || typeof element.tags !== "object" || element.tags === null ||
-        !("highway" in element.tags) || typeof element.tags.highway !== "string" ||
-        !("geometry" in element) || !Array.isArray(element.geometry)) {
-      return []
-    }
-
-    const coordinates = element.geometry.flatMap((point: unknown): [number, number][] => {
-      if (typeof point !== "object" || point === null || !("lat" in point) || !("lon" in point) ||
-          typeof point.lat !== "number" || typeof point.lon !== "number" ||
-          !Number.isFinite(point.lat) || !Number.isFinite(point.lon)) {
-        return []
+  const request = (async () => {
+    const roads: Road[] = []
+    for (const { file, highway } of roadGeoJsonFiles) {
+      signal?.throwIfAborted()
+      const text = await loadRoadFileText(file, signal)
+      let value: unknown
+      try {
+        value = JSON.parse(text) as unknown
+      } catch (error) {
+        if (error instanceof SyntaxError) throw new Error(`Road data file ${file} contains invalid JSON.`)
+        throw error
       }
-      return [[point.lat, point.lon]]
-    })
-    if (coordinates.length < 2) return []
-
-    return [{
-      id: element.id,
-      highway: element.tags.highway,
-      name: "name" in element.tags && typeof element.tags.name === "string" ? element.tags.name : undefined,
-      coordinates,
-    }]
+      roads.push(...await parseRoadFeatures(value, highway, file, bounds, signal))
+    }
+    signal?.throwIfAborted()
+    return roads
+  })()
+  roadSelectionCache.set(selectionKey, request)
+  if (roadSelectionCache.size > 2) {
+    const oldestSelection = roadSelectionCache.keys().next().value
+    if (oldestSelection !== undefined && oldestSelection !== selectionKey) roadSelectionCache.delete(oldestSelection)
+  }
+  void request.catch(() => {
+    if (roadSelectionCache.get(selectionKey) === request) roadSelectionCache.delete(selectionKey)
   })
+  return request
 }
 
 async function sampleTreeGroundHeights(meshes: DEMMesh[], trees: TreeInView[]): Promise<TreeAtGround[]> {
@@ -376,18 +463,20 @@ export async function loadTreesInArea(map: LeafletMap, selection: MapSelection) 
   return trees.length
 }
 
-export async function loadRoadsInArea(map: LeafletMap, selection: MapSelection) {
-  const roads = await fetchRoadsInArea(selection)
+export async function loadRoadsInArea(map: LeafletMap, selection: MapSelection, signal?: AbortSignal) {
+  const roads = await fetchRoadsInArea(selection, signal)
   const layer = getMapOverlays(map).roads
   layer.clearLayers()
   for (const road of roads) {
-    L.polyline(road.coordinates, {
-      color: "#315d67",
-      weight: 3,
-      opacity: 0.85,
-    })
-      .bindTooltip(road.name ?? `Road (${road.highway})`)
-      .addTo(layer)
+    for (const path of road.coordinates) {
+      L.polyline(path, {
+        color: "#ff0000",
+        weight: 1,
+        opacity: 0.85,
+      })
+        .bindTooltip(road.name ?? `Road (${road.highway})`)
+        .addTo(layer)
+    }
   }
   return roads.length
 }
@@ -448,10 +537,10 @@ export function setMapOverlayVisibility(map: LeafletMap, name: MapOverlayName, v
   else map.removeLayer(layer)
 }
 
-async function yieldToBrowser(signal: AbortSignal) {
-  signal.throwIfAborted()
+async function yieldToBrowser(signal?: AbortSignal) {
+  signal?.throwIfAborted()
   await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
-  signal.throwIfAborted()
+  signal?.throwIfAborted()
 }
 
 function createDEMPointSampler(meshes: DEMMesh[]): DEMSurface {
@@ -606,14 +695,14 @@ function clipRoadSegment(
   return [pointAt(minimum), pointAt(maximum)]
 }
 
-function getRoadPaths(road: Road, bounds: ViewBounds): [number, number][][] {
+function clipRoadPath(coordinates: [number, number][], bounds: ViewBounds): [number, number][][] {
   const paths: [number, number][][] = []
   let path: [number, number][] = []
   const samePoint = (left: [number, number], right: [number, number]) =>
     Math.abs(left[0] - right[0]) < 1e-10 && Math.abs(left[1] - right[1]) < 1e-10
 
-  for (let index = 0; index < road.coordinates.length - 1; index++) {
-    const segment = clipRoadSegment(road.coordinates[index], road.coordinates[index + 1], bounds)
+  for (let index = 0; index < coordinates.length - 1; index++) {
+    const segment = clipRoadSegment(coordinates[index], coordinates[index + 1], bounds)
     if (!segment) {
       if (path.length > 1) paths.push(path)
       path = []
@@ -639,7 +728,6 @@ async function appendRoadPolylines(
   lines: string[],
   roads: Road[],
   origin: [number, number],
-  bounds: ViewBounds,
   firstVertexIndex: number,
   sampleTerrain: DEMSurface,
   signal: AbortSignal,
@@ -648,9 +736,9 @@ async function appendRoadPolylines(
   lines.push("g Roads")
   for (const [roadIndex, road] of roads.entries()) {
     if (roadIndex > 0 && roadIndex % 50 === 0) await yieldToBrowser(signal)
-    for (const [pathIndex, path] of getRoadPaths(road, bounds).entries()) {
+    for (const [pathIndex, path] of road.coordinates.entries()) {
       const pathIndices: number[] = []
-      lines.push(`o road_${road.id}_${pathIndex + 1}`)
+      lines.push(`o road_${road.id.replace(/[^A-Za-z0-9_-]/g, "_")}_${pathIndex + 1}`)
       path.forEach(([latitude, longitude]) => {
         const elevation = sampleTerrain(longitude, latitude)
         if (elevation === undefined || !Number.isFinite(elevation)) {
@@ -766,7 +854,7 @@ async function saveObj(
   }
 
   const nextTreeVertexIndex = await appendTreeCylinders(lines, trees, origin, vertexIndex, sampleTerrain, signal)
-  const nextRoadVertexIndex = await appendRoadPolylines(lines, roads, origin, bounds, nextTreeVertexIndex, sampleTerrain, signal)
+  const nextRoadVertexIndex = await appendRoadPolylines(lines, roads, origin, nextTreeVertexIndex, sampleTerrain, signal)
   await appendDEMMeshes(lines, terrainMeshes, origin, nextRoadVertexIndex, signal)
 
   signal.throwIfAborted()
