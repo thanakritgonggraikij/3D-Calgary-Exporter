@@ -1,22 +1,10 @@
-import {
-  Cartesian3,
-  Cartographic,
-  Color,
-  EllipsoidTerrainProvider,
-  HeightReference,
-  PolygonHierarchy,
-  Rectangle,
-  sampleTerrain,
-  sampleTerrainMostDetailed,
-  type Viewer,
-} from "cesium"
+import * as L from "leaflet"
+import type { Map as LeafletMap } from "leaflet"
 
 const treesApi = "https://data.calgary.ca/resource/tfs4-3wwa.json"
+const roadsApi = "https://overpass-api.de/api/interpreter"
 const chunksBaseUrl = "https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_chunks/"
 const demChunksBaseUrl = "https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_chunks/"
-const treeEntityPrefix = "calgary-tree-"
-const buildingEntityPrefix = "calgary-building-"
-const demExtentEntityPrefix = "calgary-dem-extent-"
 const treeHeightMeters = 5
 const treeRadiusMeters = 0.25
 const treeCylinderSegments = 16
@@ -29,6 +17,7 @@ type DEMChunksIndex = {
   chunks: DEMChunk[]
   mesh_coordinate_system?: string
   mesh_format?: "obj" | "caldem2-v1"
+  elevation_origin_meters?: number
 }
 type DEMVertex = [longitude: number, latitude: number, elevation: number]
 type DEMMesh = {
@@ -37,9 +26,7 @@ type DEMMesh = {
   vertices: DEMVertex[]
   faces: number[][]
   grid?: { columns: number; rows: number }
-  anchor: Cartographic
 }
-type PositionedDEMMesh = DEMMesh & { elevationOffset: number }
 type Coordinate = [number, number, number?]
 type BuildingGeometry =
   | { type: "Polygon"; coordinates: Coordinate[][] }
@@ -59,10 +46,32 @@ type TreeRecord = {
 }
 type TreeInView = { tree: TreeRecord; index: number; longitude: number; latitude: number }
 type TreeAtGround = TreeInView & { ground: number }
+type Road = {
+  id: number
+  highway: string
+  name?: string
+  coordinates: [latitude: number, longitude: number][]
+}
 
 let chunksIndexPromise: Promise<ChunksIndex> | undefined
 let demChunksIndexPromise: Promise<DEMChunksIndex> | undefined
 const chunkCache = new Map<string, BuildingFeature[]>()
+type MapOverlays = { trees: L.LayerGroup; buildings: L.LayerGroup; demExtents: L.LayerGroup; roads: L.LayerGroup }
+const mapOverlays = new WeakMap<LeafletMap, MapOverlays>()
+
+function getMapOverlays(map: LeafletMap): MapOverlays {
+  let overlays = mapOverlays.get(map)
+  if (!overlays) {
+    overlays = {
+      trees: L.layerGroup().addTo(map),
+      buildings: L.layerGroup().addTo(map),
+      demExtents: L.layerGroup().addTo(map),
+      roads: L.layerGroup().addTo(map),
+    }
+    mapOverlays.set(map, overlays)
+  }
+  return overlays
+}
 
 export function getSelectionBounds(selection: MapSelection): ViewBounds {
   const radians = Math.PI / 180
@@ -98,35 +107,35 @@ function getContainedChunks<T extends { bounds: ViewBounds }>(chunks: T[], selec
   return containedChunks
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url)
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, { signal })
   if (!response.ok) throw new Error(`Request failed (${response.status}): ${url}`)
   return response.json() as Promise<T>
 }
 
-async function getChunksIndex() {
-  chunksIndexPromise ??= fetchJson<ChunksIndex>(`${chunksBaseUrl}chunks_index.json`).catch((error: unknown) => {
+async function getChunksIndex(signal?: AbortSignal) {
+  chunksIndexPromise ??= fetchJson<ChunksIndex>(`${chunksBaseUrl}chunks_index.json`, signal).catch((error: unknown) => {
     chunksIndexPromise = undefined
     throw error
   })
   return chunksIndexPromise
 }
 
-async function getDEMChunksIndex() {
-  demChunksIndexPromise ??= fetchJson<DEMChunksIndex>(`${demChunksBaseUrl}chunks_index.json`).catch((error: unknown) => {
+async function getDEMChunksIndex(signal?: AbortSignal) {
+  demChunksIndexPromise ??= fetchJson<DEMChunksIndex>(`${demChunksBaseUrl}chunks_index.json`, signal).catch((error: unknown) => {
     demChunksIndexPromise = undefined
     throw error
   })
   return demChunksIndexPromise
 }
 
-async function loadDetailedFeatures(selection: MapSelection) {
-  const index = await getChunksIndex()
+async function loadDetailedFeatures(selection: MapSelection, signal?: AbortSignal) {
+  const index = await getChunksIndex(signal)
   const chunks = getContainedChunks(index.chunks, selection)
   const featureLists = await Promise.all(chunks.map(async ({ file }) => {
     let features = chunkCache.get(file)
     if (!features) {
-      const chunk = await fetchJson<{ features: BuildingFeature[] }>(`${chunksBaseUrl}${file}`)
+      const chunk = await fetchJson<{ features: BuildingFeature[] }>(`${chunksBaseUrl}${file}`, signal)
       features = chunk.features
       chunkCache.set(file, features)
     }
@@ -135,7 +144,7 @@ async function loadDetailedFeatures(selection: MapSelection) {
   return featureLists.flat()
 }
 
-function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenced: boolean): DEMMesh {
+function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenced: boolean, elevationOrigin: number): DEMMesh {
   const vertices: DEMVertex[] = []
   const faces: number[][] = []
 
@@ -147,8 +156,8 @@ function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenc
         throw new Error(`Invalid vertex in DEM chunk ${file}.`)
       }
       vertices.push(georeferenced
-        ? [vertex[0], vertex[2], vertex[1]]
-        : [vertex[0], vertex[1], vertex[2]])
+        ? [vertex[0], vertex[2], vertex[1] + elevationOrigin]
+        : [vertex[0], vertex[1], vertex[2] + elevationOrigin])
     } else if (parts[0] === "f") {
       const face = parts.slice(1).map((part) => {
         const index = Number.parseInt(part.split("/")[0], 10)
@@ -165,12 +174,7 @@ function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenc
   }
 
   if (!vertices.length || !faces.length) throw new Error(`DEM chunk ${file} has no usable mesh.`)
-  let anchorLongitude: number
-  let anchorLatitude: number
-
-  if (georeferenced) {
-    [anchorLongitude, anchorLatitude] = vertices[0]
-  } else {
+  if (!georeferenced) {
     const longitudes = vertices.map(([longitude]) => longitude)
     const latitudes = vertices.map(([, latitude]) => latitude)
     const minEasting = Math.min(...longitudes)
@@ -181,9 +185,6 @@ function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenc
     const northSouthSpan = maxNorthing - minNorthing
     if (eastWestSpan <= 0 || northSouthSpan <= 0) throw new Error(`DEM chunk ${file} has invalid horizontal bounds.`)
 
-    const [anchorEasting, anchorNorthing] = vertices[0]
-    anchorLongitude = bounds.west + ((anchorEasting - minEasting) / eastWestSpan) * (bounds.east - bounds.west)
-    anchorLatitude = bounds.south + ((anchorNorthing - minNorthing) / northSouthSpan) * (bounds.north - bounds.south)
     vertices.forEach((vertex, index) => {
       vertices[index] = [
         bounds.west + ((vertex[0] - minEasting) / eastWestSpan) * (bounds.east - bounds.west),
@@ -193,8 +194,7 @@ function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenc
     })
   }
 
-  const anchor = Cartographic.fromDegrees(anchorLongitude, anchorLatitude)
-  return { file, bounds, vertices, faces, anchor }
+  return { file, bounds, vertices, faces }
 }
 
 function parseCaldem2(file: string, bounds: ViewBounds, data: ArrayBuffer): DEMMesh {
@@ -211,9 +211,11 @@ function parseCaldem2(file: string, bounds: ViewBounds, data: ArrayBuffer): DEMM
   const columns = view.getUint32(12, true)
   const rows = view.getUint32(16, true)
   const vertexCount = view.getUint32(20, true)
+  const elevationOrigin = view.getFloat32(56, true)
   if (!columns || !rows || vertexCount !== columns * rows) {
     throw new Error(`DEM chunk ${file} has invalid grid dimensions.`)
   }
+  if (!Number.isFinite(elevationOrigin)) throw new Error(`DEM chunk ${file} has an invalid elevation origin.`)
   const expectedByteLength = headerSize + vertexCount * bytesPerVertex
   if (data.byteLength !== expectedByteLength) {
     throw new Error(`DEM chunk ${file} has invalid data length.`)
@@ -228,7 +230,7 @@ function parseCaldem2(file: string, bounds: ViewBounds, data: ArrayBuffer): DEMM
     if (![longitude, latitude, elevation].every(Number.isFinite)) {
       throw new Error(`DEM chunk ${file} contains invalid vertices.`)
     }
-    vertices.push([longitude, latitude, elevation])
+    vertices.push([longitude, latitude, elevation + elevationOrigin])
   }
 
   const [anchorLongitude, anchorLatitude] = vertices[0]
@@ -243,90 +245,55 @@ function parseCaldem2(file: string, bounds: ViewBounds, data: ArrayBuffer): DEMM
     vertices,
     faces: [],
     grid: { columns, rows },
-    anchor: Cartographic.fromDegrees(anchorLongitude, anchorLatitude),
   }
 }
 
-async function loadDEMMeshes(viewer: Viewer, selection: MapSelection): Promise<PositionedDEMMesh[]> {
-  const index = await getDEMChunksIndex()
+async function loadDEMMeshes(selection: MapSelection, signal?: AbortSignal): Promise<DEMMesh[]> {
+  const index = await getDEMChunksIndex(signal)
   const chunks = getIntersectingChunks(index.chunks, selection)
   if (!chunks.length) throw new Error("No DEM chunks found in the current view.")
 
   const binaryFormat = index.mesh_format === "caldem2-v1"
   const georeferenced = index.mesh_coordinate_system === "EPSG:4326"
+  const indexedElevationOrigin = index.elevation_origin_meters
+  if (!binaryFormat && (indexedElevationOrigin === undefined || !Number.isFinite(indexedElevationOrigin))) {
+    throw new Error("The DEM index is missing its elevation origin.")
+  }
+  const elevationOrigin = indexedElevationOrigin ?? 0
   const meshes = await Promise.all(chunks.map(async ({ file, bounds: chunkBounds }) => {
-    const response = await fetch(`${demChunksBaseUrl}${file}`)
+    const response = await fetch(`${demChunksBaseUrl}${file}`, { signal })
     if (!response.ok) throw new Error(`Request failed (${response.status}): ${file}`)
     return binaryFormat
       ? parseCaldem2(file, chunkBounds, await response.arrayBuffer())
-      : parseDEMObj(file, chunkBounds, await response.text(), georeferenced)
+      : parseDEMObj(file, chunkBounds, await response.text(), georeferenced, elevationOrigin)
   }))
 
-  if (viewer.terrainProvider instanceof EllipsoidTerrainProvider) {
-    throw new Error("DEM OBJ export needs Cesium terrain to align chunk heights. Add a Cesium ion token and try again.")
-  }
-
-  const positions = meshes.map(({ anchor }) => anchor)
-  const terrainProvider = viewer.terrainProvider
-  const sampledPositions = terrainProvider.availability
-    ? await sampleTerrainMostDetailed(terrainProvider, positions)
-    : await sampleTerrain(terrainProvider, 12, positions)
-
-  if (sampledPositions.some((position) => !Number.isFinite(position.height))) {
-    throw new Error("Could not determine terrain height for some DEM chunks. Wait for terrain to load and try again.")
-  }
-
-  const offsets = meshes.map((mesh, index) => sampledPositions[index].height - mesh.vertices[0][2])
-  const sortedOffsets = offsets.slice().sort((a, b) => a - b)
-  const elevationOffset = sortedOffsets.length % 2
-    ? sortedOffsets[Math.floor(sortedOffsets.length / 2)]
-    : (sortedOffsets[sortedOffsets.length / 2 - 1] + sortedOffsets[sortedOffsets.length / 2]) / 2
-
-  return meshes.map((mesh) => ({
-    ...mesh,
-    elevationOffset,
-  }))
+  return meshes
 }
 
-export async function loadDEMExtent(viewer: Viewer, selection: MapSelection) {
+export async function loadDEMExtent(map: LeafletMap, selection: MapSelection) {
   const index = await getDEMChunksIndex()
   const chunks = getIntersectingChunks(index.chunks, selection)
-
-  viewer.entities.values
-    .filter((entity) => entity.id.startsWith(demExtentEntityPrefix))
-    .forEach((entity) => viewer.entities.remove(entity))
-
+  const layer = getMapOverlays(map).demExtents
+  layer.clearLayers()
   chunks.forEach(({ bounds: chunkBounds }, index) => {
-    viewer.entities.add({
-      id: `${demExtentEntityPrefix}${index}`,
-      name: "DEM chunk extent",
-      rectangle: {
-        coordinates: Rectangle.fromDegrees(
-          chunkBounds.west,
-          chunkBounds.south,
-          chunkBounds.east,
-          chunkBounds.north,
-        ),
-        height: 0,
-        heightReference: HeightReference.CLAMP_TO_GROUND,
-        material: Color.CYAN.withAlpha(0.12),
-        outline: true,
-        outlineColor: Color.CYAN,
-      },
-    })
+    L.rectangle(
+      [[chunkBounds.south, chunkBounds.west], [chunkBounds.north, chunkBounds.east]],
+      { color: "#00bcd4", weight: 1, fillColor: "#00bcd4", fillOpacity: 0.12 },
+    ).bindTooltip(`DEM chunk ${index + 1}`).addTo(layer)
   })
 
   return chunks.length
 }
 
-async function fetchTreesInArea(selection: MapSelection) {
+async function fetchTreesInArea(selection: MapSelection, signal?: AbortSignal) {
   const bounds = getSelectionBounds(selection)
   const params = new URLSearchParams({
     "$where": `within_box(point, ${bounds.north}, ${bounds.west}, ${bounds.south}, ${bounds.east})`,
     "$limit": "2000",
     "$select": ":id,tree_asset_cd,common_name,point",
   })
-  const trees = await fetchJson<TreeRecord[]>(`${treesApi}?${params}`)
+  const trees = await fetchJson<TreeRecord[]>(`${treesApi}?${params}`, signal)
   return trees.flatMap((tree, index): TreeInView[] => {
     const coordinates = tree.point?.coordinates
     if (!coordinates) return []
@@ -334,53 +301,108 @@ async function fetchTreesInArea(selection: MapSelection) {
   })
 }
 
-async function sampleTreeGroundHeights(viewer: Viewer, trees: TreeInView[]): Promise<TreeAtGround[]> {
-  if (trees.length === 0) return []
-  const terrainPositions = trees.map(({ longitude, latitude }) =>
-    Cartographic.fromDegrees(longitude, latitude),
-  )
-  const terrainProvider = viewer.terrainProvider
-  const sampledPositions = terrainProvider.availability
-    ? await sampleTerrainMostDetailed(terrainProvider, terrainPositions)
-    : await sampleTerrain(terrainProvider, 12, terrainPositions)
+async function fetchRoadsInArea(selection: MapSelection, signal?: AbortSignal): Promise<Road[]> {
+  const bounds = getSelectionBounds(selection)
+  const query = `[out:json][timeout:25];way["highway"](${bounds.south},${bounds.west},${bounds.north},${bounds.east});out geom;`
+  const response = await fetch(roadsApi, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({ data: query }),
+    signal,
+  })
+  if (!response.ok) throw new Error(`OpenStreetMap road request failed (${response.status}).`)
 
-  if (sampledPositions.some((position) => !Number.isFinite(position.height))) {
-    throw new Error("Could not determine ground elevation for some trees. Try again after terrain finishes loading.")
+  const result: unknown = await response.json()
+  if (typeof result !== "object" || result === null || !("elements" in result) || !Array.isArray(result.elements)) {
+    throw new Error("OpenStreetMap returned an invalid road response.")
+  }
+  if ("remark" in result && typeof result.remark === "string" && result.remark) {
+    throw new Error(`OpenStreetMap road request failed: ${result.remark}`)
   }
 
-  return trees.map((tree, index) => ({ ...tree, ground: sampledPositions[index].height }))
-}
+  return result.elements.flatMap((element): Road[] => {
+    if (typeof element !== "object" || element === null || !("type" in element) || element.type !== "way" ||
+        !("id" in element) || typeof element.id !== "number" ||
+        !("tags" in element) || typeof element.tags !== "object" || element.tags === null ||
+        !("highway" in element.tags) || typeof element.tags.highway !== "string" ||
+        !("geometry" in element) || !Array.isArray(element.geometry)) {
+      return []
+    }
 
-export async function loadTreesInArea(viewer: Viewer, selection: MapSelection) {
-  const trees = await fetchTreesInArea(selection)
-  const treesAtGround = await sampleTreeGroundHeights(viewer, trees)
-
-  viewer.entities.values
-    .filter((entity) => entity.id.startsWith(treeEntityPrefix))
-    .forEach((entity) => viewer.entities.remove(entity))
-
-  for (const { tree, index, longitude, latitude, ground } of treesAtGround) {
-    viewer.entities.add({
-      id: `${treeEntityPrefix}${tree[":id"] ?? `${tree.tree_asset_cd ?? "record"}-${index}`}`,
-      name: tree.common_name ?? "Calgary tree",
-      position: Cartesian3.fromDegrees(longitude, latitude, ground + 2),
-      point: { pixelSize: 7, color: Color.DARKGREEN, outlineColor: Color.WHITE, outlineWidth: 1 },
+    const coordinates = element.geometry.flatMap((point: unknown): [number, number][] => {
+      if (typeof point !== "object" || point === null || !("lat" in point) || !("lon" in point) ||
+          typeof point.lat !== "number" || typeof point.lon !== "number" ||
+          !Number.isFinite(point.lat) || !Number.isFinite(point.lon)) {
+        return []
+      }
+      return [[point.lat, point.lon]]
     })
-  }
-  return treesAtGround.length
+    if (coordinates.length < 2) return []
+
+    return [{
+      id: element.id,
+      highway: element.tags.highway,
+      name: "name" in element.tags && typeof element.tags.name === "string" ? element.tags.name : undefined,
+      coordinates,
+    }]
+  })
 }
 
-function getOuterRings(feature: BuildingFeature): Coordinate[][] {
-  const geometry = feature.geometry
-  if (geometry?.type === "Polygon") return [geometry.coordinates[0] ?? []]
-  if (geometry?.type === "MultiPolygon") return geometry.coordinates.map((polygon) => polygon[0] ?? [])
-  return []
+async function sampleTreeGroundHeights(meshes: DEMMesh[], trees: TreeInView[]): Promise<TreeAtGround[]> {
+  if (trees.length === 0) return []
+  const sampleTerrain = createDEMPointSampler(meshes)
+  return trees.map((tree) => {
+    const ground = sampleTerrain(tree.longitude, tree.latitude)
+    if (ground === undefined || !Number.isFinite(ground)) {
+      throw new Error("Could not determine ground elevation for some trees from the DEM data.")
+    }
+    return { ...tree, ground }
+  })
+}
+
+export async function loadTreesInArea(map: LeafletMap, selection: MapSelection) {
+  const trees = await fetchTreesInArea(selection)
+  const layer = getMapOverlays(map).trees
+  layer.clearLayers()
+  for (const { tree, longitude, latitude } of trees) {
+    L.circleMarker([latitude, longitude], {
+      radius: 4,
+      color: "#ffffff",
+      weight: 1,
+      fillColor: "#006400",
+      fillOpacity: 1,
+    }).bindTooltip(tree.common_name ?? "Calgary tree").addTo(layer)
+  }
+  return trees.length
+}
+
+export async function loadRoadsInArea(map: LeafletMap, selection: MapSelection) {
+  const roads = await fetchRoadsInArea(selection)
+  const layer = getMapOverlays(map).roads
+  layer.clearLayers()
+  for (const road of roads) {
+    L.polyline(road.coordinates, {
+      color: "#315d67",
+      weight: 3,
+      opacity: 0.85,
+    })
+      .bindTooltip(road.name ?? `Road (${road.highway})`)
+      .addTo(layer)
+  }
+  return roads.length
 }
 
 function getAllRings(feature: BuildingFeature): Coordinate[][] {
   const geometry = feature.geometry
   if (geometry?.type === "Polygon") return geometry.coordinates
   if (geometry?.type === "MultiPolygon") return geometry.coordinates.flat()
+  return []
+}
+
+function getPolygonRings(feature: BuildingFeature): Coordinate[][][] {
+  const geometry = feature.geometry
+  if (geometry?.type === "Polygon") return [geometry.coordinates]
+  if (geometry?.type === "MultiPolygon") return geometry.coordinates
   return []
 }
 
@@ -394,32 +416,21 @@ function getGroundAndFallbackRoof(feature: BuildingFeature, rings: Coordinate[][
   return { ground, fallbackRoof: Math.max(roof, ground + 3) }
 }
 
-export async function loadBuildingsInArea(viewer: Viewer, selection: MapSelection) {
+export async function loadBuildingsInArea(map: LeafletMap, selection: MapSelection) {
   const features = await loadDetailedFeatures(selection)
-  viewer.entities.values
-    .filter((entity) => entity.id.startsWith(buildingEntityPrefix))
-    .forEach((entity) => viewer.entities.remove(entity))
-
+  const layer = getMapOverlays(map).buildings
+  layer.clearLayers()
   let count = 0
-  features.forEach((feature, featureIndex) => {
-    const rings = getOuterRings(feature)
-    if (!rings[0]?.length) return
-    const { ground, fallbackRoof } = getGroundAndFallbackRoof(feature, rings)
-    rings.forEach((ring, ringIndex) => {
-      const positions = ring.slice(0, -1).map(([longitude, latitude]) => Cartesian3.fromDegrees(longitude, latitude))
-      if (positions.length < 3) return
-      viewer.entities.add({
-        id: `${buildingEntityPrefix}${featureIndex}-${ringIndex}`,
-        name: `Calgary building ${featureIndex + 1}`,
-        polygon: {
-          hierarchy: new PolygonHierarchy(positions),
-          height: ground,
-          extrudedHeight: fallbackRoof,
-          material: Color.ORANGERED.withAlpha(0.8),
-          outline: true,
-          outlineColor: Color.WHITE,
-        },
-      })
+  features.forEach((feature) => {
+    getPolygonRings(feature).forEach((rings) => {
+      const positions = rings.map((ring) => ring.slice(0, -1).map(([longitude, latitude]) => [latitude, longitude] as L.LatLngTuple))
+      if (!positions[0] || positions[0].length < 3) return
+      L.polygon(positions, {
+        color: "#ffffff",
+        weight: 1,
+        fillColor: "#ff4500",
+        fillOpacity: 0.8,
+      }).addTo(layer)
       count++
     })
   })
@@ -428,7 +439,22 @@ export async function loadBuildingsInArea(viewer: Viewer, selection: MapSelectio
 
 type DEMSurface = (longitude: number, latitude: number) => number | undefined
 
-function createDEMPointSampler(meshes: PositionedDEMMesh[]): DEMSurface {
+export type MapOverlayName = "buildings" | "trees" | "terrain" | "roads"
+
+export function setMapOverlayVisibility(map: LeafletMap, name: MapOverlayName, visible: boolean) {
+  const overlays = getMapOverlays(map)
+  const layer = name === "terrain" ? overlays.demExtents : overlays[name]
+  if (visible) layer.addTo(map)
+  else map.removeLayer(layer)
+}
+
+async function yieldToBrowser(signal: AbortSignal) {
+  signal.throwIfAborted()
+  await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+  signal.throwIfAborted()
+}
+
+function createDEMPointSampler(meshes: DEMMesh[]): DEMSurface {
   return (longitude, latitude) => {
     const bestMatch = meshes.find((mesh) =>
       longitude >= mesh.bounds.west && longitude <= mesh.bounds.east &&
@@ -447,7 +473,7 @@ function createDEMPointSampler(meshes: PositionedDEMMesh[]): DEMSurface {
       const elevationAt = (sampleRow: number, sampleColumn: number) => {
         const index = sampleRow * columns + sampleColumn
         const [, , elevation] = bestMatch!.vertices[index]
-        return elevation + bestMatch!.elevationOffset
+        return elevation
       }
       const top = elevationAt(row, column) * (1 - columnFraction) + elevationAt(row, column + 1) * columnFraction
       const bottom = elevationAt(row + 1, column) * (1 - columnFraction) + elevationAt(row + 1, column + 1) * columnFraction
@@ -460,7 +486,7 @@ function createDEMPointSampler(meshes: PositionedDEMMesh[]): DEMSurface {
       const distance = (sampleLongitude - longitude) ** 2 + (sampleLatitude - latitude) ** 2
       if (distance < nearestDistance) {
         nearestDistance = distance
-        nearestElevation = elevation + bestMatch.elevationOffset
+        nearestElevation = elevation
       }
     }
     return nearestElevation
@@ -481,11 +507,20 @@ function toLocalMeters(longitude: number, latitude: number, origin: [number, num
   }
 }
 
-function appendTreeCylinders(lines: string[], trees: TreeAtGround[], origin: [number, number], firstVertexIndex: number, sampleTerrain: DEMSurface) {
+async function appendTreeCylinders(
+  lines: string[],
+  trees: TreeAtGround[],
+  origin: [number, number],
+  firstVertexIndex: number,
+  sampleTerrain: DEMSurface,
+  signal: AbortSignal,
+) {
   let vertexIndex = firstVertexIndex
   const angleStep = (Math.PI * 2) / treeCylinderSegments
 
-  trees.forEach(({ tree, index, longitude, latitude }) => {
+  lines.push("g Trees")
+  for (const [treeIndex, { tree, index, longitude, latitude }] of trees.entries()) {
+    if (treeIndex > 0 && treeIndex % 100 === 0) await yieldToBrowser(signal)
     const local = toLocalMeters(longitude, latitude, origin)
     const latitudeRadians = latitude * Math.PI / 180
     const flattening = 1 / 298.257223563
@@ -529,44 +564,161 @@ function appendTreeCylinders(lines: string[], trees: TreeAtGround[], origin: [nu
       lines.push(`f ${bottomCenter} ${bottom} ${bottomNext}`)
       lines.push(`f ${topCenter} ${topNext} ${top}`)
     }
-  })
+  }
 
   return vertexIndex
 }
 
+function clipRoadSegment(
+  start: [number, number],
+  end: [number, number],
+  bounds: ViewBounds,
+): [[number, number], [number, number]] | undefined {
+  const [startLatitude, startLongitude] = start
+  const [endLatitude, endLongitude] = end
+  const deltaLongitude = endLongitude - startLongitude
+  const deltaLatitude = endLatitude - startLatitude
+  let minimum = 0
+  let maximum = 1
+  const constraints: [number, number][] = [
+    [-deltaLongitude, startLongitude - bounds.west],
+    [deltaLongitude, bounds.east - startLongitude],
+    [-deltaLatitude, startLatitude - bounds.south],
+    [deltaLatitude, bounds.north - startLatitude],
+  ]
 
+  for (const [direction, distance] of constraints) {
+    if (direction === 0) {
+      if (distance < 0) return undefined
+      continue
+    }
 
-function appendDEMMeshes(lines: string[], meshes: PositionedDEMMesh[], origin: [number, number], firstVertexIndex: number) {
+    const ratio = distance / direction
+    if (direction < 0) minimum = Math.max(minimum, ratio)
+    else maximum = Math.min(maximum, ratio)
+    if (minimum > maximum) return undefined
+  }
+
+  const pointAt = (ratio: number): [number, number] => [
+    startLatitude + deltaLatitude * ratio,
+    startLongitude + deltaLongitude * ratio,
+  ]
+  return [pointAt(minimum), pointAt(maximum)]
+}
+
+function getRoadPaths(road: Road, bounds: ViewBounds): [number, number][][] {
+  const paths: [number, number][][] = []
+  let path: [number, number][] = []
+  const samePoint = (left: [number, number], right: [number, number]) =>
+    Math.abs(left[0] - right[0]) < 1e-10 && Math.abs(left[1] - right[1]) < 1e-10
+
+  for (let index = 0; index < road.coordinates.length - 1; index++) {
+    const segment = clipRoadSegment(road.coordinates[index], road.coordinates[index + 1], bounds)
+    if (!segment) {
+      if (path.length > 1) paths.push(path)
+      path = []
+      continue
+    }
+
+    const [start, end] = segment
+    if (!path.length) {
+      path = [start, end]
+    } else if (samePoint(path[path.length - 1], start)) {
+      if (!samePoint(path[path.length - 1], end)) path.push(end)
+    } else {
+      if (path.length > 1) paths.push(path)
+      path = [start, end]
+    }
+  }
+
+  if (path.length > 1) paths.push(path)
+  return paths
+}
+
+async function appendRoadPolylines(
+  lines: string[],
+  roads: Road[],
+  origin: [number, number],
+  bounds: ViewBounds,
+  firstVertexIndex: number,
+  sampleTerrain: DEMSurface,
+  signal: AbortSignal,
+) {
   let vertexIndex = firstVertexIndex
-  meshes.forEach((mesh) => {
+  lines.push("g Roads")
+  for (const [roadIndex, road] of roads.entries()) {
+    if (roadIndex > 0 && roadIndex % 50 === 0) await yieldToBrowser(signal)
+    for (const [pathIndex, path] of getRoadPaths(road, bounds).entries()) {
+      const pathIndices: number[] = []
+      lines.push(`o road_${road.id}_${pathIndex + 1}`)
+      path.forEach(([latitude, longitude]) => {
+        const elevation = sampleTerrain(longitude, latitude)
+        if (elevation === undefined || !Number.isFinite(elevation)) {
+          throw new Error(`Could not drape road ${road.name ?? road.id} onto the DEM.`)
+        }
+        const local = toLocalMeters(longitude, latitude, origin)
+        lines.push(`v ${local.x.toFixed(3)} ${(elevation + 0.05).toFixed(3)} ${local.z.toFixed(3)}`)
+        pathIndices.push(vertexIndex++)
+      })
+      lines.push(`l ${pathIndices.join(" ")}`)
+    }
+  }
+
+  return vertexIndex
+}
+
+async function appendDEMMeshes(
+  lines: string[],
+  meshes: DEMMesh[],
+  origin: [number, number],
+  firstVertexIndex: number,
+  signal: AbortSignal,
+) {
+  let vertexIndex = firstVertexIndex
+  let processedItems = 0
+  lines.push("g Terrain")
+  for (const mesh of meshes) {
     lines.push(`o terrain_${mesh.file.replace(/[^a-zA-Z0-9_-]/g, "_")}`)
-    mesh.vertices.forEach(([longitude, latitude, elevation]) => {
+    for (const [longitude, latitude, elevation] of mesh.vertices) {
+      if (processedItems > 0 && processedItems % 10000 === 0) await yieldToBrowser(signal)
       const local = toLocalMeters(longitude, latitude, origin)
-      lines.push(`v ${local.x.toFixed(3)} ${(elevation + mesh.elevationOffset).toFixed(3)} ${local.z.toFixed(3)}`)
-    })
+      lines.push(`v ${local.x.toFixed(3)} ${elevation.toFixed(3)} ${local.z.toFixed(3)}`)
+      processedItems++
+    }
     if (mesh.grid) {
       const { columns, rows } = mesh.grid
       for (let row = 0; row < rows - 1; row++) {
         for (let column = 0; column < columns - 1; column++) {
+          if (processedItems > 0 && processedItems % 10000 === 0) await yieldToBrowser(signal)
           const a = vertexIndex + row * columns + column
           const b = a + 1
           const c = a + columns
           const d = c + 1
           lines.push(`f ${a} ${b} ${d}`)
           lines.push(`f ${a} ${d} ${c}`)
+          processedItems++
         }
       }
     } else {
-      mesh.faces.forEach((face) => {
+      for (const face of mesh.faces) {
+        if (processedItems > 0 && processedItems % 10000 === 0) await yieldToBrowser(signal)
         lines.push(`f ${face.map((index) => vertexIndex + index).join(" ")}`)
-      })
+        processedItems++
+      }
     }
     vertexIndex += mesh.vertices.length
-  })
+  }
 }
 // -------------------- OBJ EXPORT --------------------
 
-function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMeshes: PositionedDEMMesh[], bounds: ViewBounds) {
+async function saveObj(
+  features: BuildingFeature[],
+  trees: TreeAtGround[],
+  roads: Road[],
+  terrainMeshes: DEMMesh[],
+  bounds: ViewBounds,
+  signal: AbortSignal,
+) {
   const firstRing = features.flatMap(getAllRings).find((ring) => ring.length)
   const origin: [number, number] = firstRing
     ? [firstRing[0][0], firstRing[0][1]]
@@ -577,7 +729,9 @@ function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMesh
   let vertexIndex = 1
 
   const sampleTerrain = createDEMPointSampler(terrainMeshes)
-  features.forEach((feature, buildingIndex) => {
+  lines.push("g Buildings")
+  for (const [buildingIndex, feature] of features.entries()) {
+    if (buildingIndex > 0 && buildingIndex % 50 === 0) await yieldToBrowser(signal)
     const rings = getAllRings(feature)
     const { ground, fallbackRoof } = getGroundAndFallbackRoof(feature, rings)
     const footprintSamples = rings.flatMap((ring) => ring.slice(0, -1)
@@ -609,12 +763,15 @@ function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMesh
       }
       vertexIndex += points.length * 2
     })
-  })
+  }
 
-  const nextVertexIndex = appendTreeCylinders(lines, trees, origin, vertexIndex, sampleTerrain)
-  appendDEMMeshes(lines, terrainMeshes, origin, nextVertexIndex)
+  const nextTreeVertexIndex = await appendTreeCylinders(lines, trees, origin, vertexIndex, sampleTerrain, signal)
+  const nextRoadVertexIndex = await appendRoadPolylines(lines, roads, origin, bounds, nextTreeVertexIndex, sampleTerrain, signal)
+  await appendDEMMeshes(lines, terrainMeshes, origin, nextRoadVertexIndex, signal)
 
+  signal.throwIfAborted()
   const blob = new Blob([`${lines.join("\n")}\n`], { type: "text/plain" })
+  signal.throwIfAborted()
   const url = URL.createObjectURL(blob)
   const link = document.createElement("a")
   link.href = url
@@ -623,12 +780,17 @@ function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMesh
   URL.revokeObjectURL(url)
 }
 
-export async function exportBuildingsObj(viewer: Viewer, selection: MapSelection) {
+export async function exportBuildingsObj(_map: LeafletMap, selection: MapSelection, signal: AbortSignal) {
   const bounds = getSelectionBounds(selection)
-  const features = await loadDetailedFeatures(selection)
-  const trees = await fetchTreesInArea(selection)
-  const treesAtGround = await sampleTreeGroundHeights(viewer, trees)
-  const terrainMeshes = await loadDEMMeshes(viewer, selection)
-  saveObj(features, treesAtGround, terrainMeshes, bounds)
-  return { buildingCount: features.length, treeCount: treesAtGround.length, terrainChunkCount: terrainMeshes.length }
+  const [features, trees, roads, terrainMeshes] = await Promise.all([
+    loadDetailedFeatures(selection, signal),
+    fetchTreesInArea(selection, signal),
+    fetchRoadsInArea(selection, signal),
+    loadDEMMeshes(selection, signal),
+  ])
+  signal.throwIfAborted()
+  const treesAtGround = await sampleTreeGroundHeights(terrainMeshes, trees)
+  signal.throwIfAborted()
+  await saveObj(features, treesAtGround, roads, terrainMeshes, bounds, signal)
+  return { buildingCount: features.length, treeCount: treesAtGround.length, roadCount: roads.length, terrainChunkCount: terrainMeshes.length }
 }
