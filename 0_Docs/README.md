@@ -11,7 +11,7 @@ Buildings: City of Calgary Open Data Portal (https://data.calgary.ca/Base-Maps/3
 
 Terrain: City of Calgary Open Data Portal (https://data.calgary.ca/Base-Maps/Digital-Elevation-Model-DEM-ASCII-2m/eink-tu9p/about_data)
 
-Roads: OpenStreetMap contributors via the Overpass API (https://overpass-api.de/); exported as terrain-draped OBJ polylines.
+Roads: OpenStreetMap contributors; GeoJSON files are hosted in the public Cloudflare R2 bucket. The source files total about 77 MB, are cached by the browser, and are clipped to the selected area in the browser. Enable CORS on the bucket for the deployed app's origin. Roads are exported as terrain-draped OBJ polylines.
 
 OTHER
 - Streetlight Poles -- https://data.calgary.ca/resource/vt3t-jpfj.json
