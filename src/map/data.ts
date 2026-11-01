@@ -1,22 +1,9 @@
-import {
-  Cartesian3,
-  Cartographic,
-  Color,
-  EllipsoidTerrainProvider,
-  HeightReference,
-  PolygonHierarchy,
-  Rectangle,
-  sampleTerrain,
-  sampleTerrainMostDetailed,
-  type Viewer,
-} from "cesium"
+import * as L from "leaflet"
+import type { Map as LeafletMap } from "leaflet"
 
 const treesApi = "https://data.calgary.ca/resource/tfs4-3wwa.json"
 const chunksBaseUrl = "https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_chunks/"
 const demChunksBaseUrl = "https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_chunks/"
-const treeEntityPrefix = "calgary-tree-"
-const buildingEntityPrefix = "calgary-building-"
-const demExtentEntityPrefix = "calgary-dem-extent-"
 const treeHeightMeters = 5
 const treeRadiusMeters = 0.25
 const treeCylinderSegments = 16
@@ -29,6 +16,7 @@ type DEMChunksIndex = {
   chunks: DEMChunk[]
   mesh_coordinate_system?: string
   mesh_format?: "obj" | "caldem2-v1"
+  elevation_origin_meters?: number
 }
 type DEMVertex = [longitude: number, latitude: number, elevation: number]
 type DEMMesh = {
@@ -37,9 +25,7 @@ type DEMMesh = {
   vertices: DEMVertex[]
   faces: number[][]
   grid?: { columns: number; rows: number }
-  anchor: Cartographic
 }
-type PositionedDEMMesh = DEMMesh & { elevationOffset: number }
 type Coordinate = [number, number, number?]
 type BuildingGeometry =
   | { type: "Polygon"; coordinates: Coordinate[][] }
@@ -63,6 +49,21 @@ type TreeAtGround = TreeInView & { ground: number }
 let chunksIndexPromise: Promise<ChunksIndex> | undefined
 let demChunksIndexPromise: Promise<DEMChunksIndex> | undefined
 const chunkCache = new Map<string, BuildingFeature[]>()
+type MapOverlays = { trees: L.LayerGroup; buildings: L.LayerGroup; demExtents: L.LayerGroup }
+const mapOverlays = new WeakMap<LeafletMap, MapOverlays>()
+
+function getMapOverlays(map: LeafletMap): MapOverlays {
+  let overlays = mapOverlays.get(map)
+  if (!overlays) {
+    overlays = {
+      trees: L.layerGroup().addTo(map),
+      buildings: L.layerGroup().addTo(map),
+      demExtents: L.layerGroup().addTo(map),
+    }
+    mapOverlays.set(map, overlays)
+  }
+  return overlays
+}
 
 export function getSelectionBounds(selection: MapSelection): ViewBounds {
   const radians = Math.PI / 180
@@ -135,7 +136,7 @@ async function loadDetailedFeatures(selection: MapSelection) {
   return featureLists.flat()
 }
 
-function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenced: boolean): DEMMesh {
+function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenced: boolean, elevationOrigin: number): DEMMesh {
   const vertices: DEMVertex[] = []
   const faces: number[][] = []
 
@@ -147,8 +148,8 @@ function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenc
         throw new Error(`Invalid vertex in DEM chunk ${file}.`)
       }
       vertices.push(georeferenced
-        ? [vertex[0], vertex[2], vertex[1]]
-        : [vertex[0], vertex[1], vertex[2]])
+        ? [vertex[0], vertex[2], vertex[1] + elevationOrigin]
+        : [vertex[0], vertex[1], vertex[2] + elevationOrigin])
     } else if (parts[0] === "f") {
       const face = parts.slice(1).map((part) => {
         const index = Number.parseInt(part.split("/")[0], 10)
@@ -165,12 +166,7 @@ function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenc
   }
 
   if (!vertices.length || !faces.length) throw new Error(`DEM chunk ${file} has no usable mesh.`)
-  let anchorLongitude: number
-  let anchorLatitude: number
-
-  if (georeferenced) {
-    [anchorLongitude, anchorLatitude] = vertices[0]
-  } else {
+  if (!georeferenced) {
     const longitudes = vertices.map(([longitude]) => longitude)
     const latitudes = vertices.map(([, latitude]) => latitude)
     const minEasting = Math.min(...longitudes)
@@ -181,9 +177,6 @@ function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenc
     const northSouthSpan = maxNorthing - minNorthing
     if (eastWestSpan <= 0 || northSouthSpan <= 0) throw new Error(`DEM chunk ${file} has invalid horizontal bounds.`)
 
-    const [anchorEasting, anchorNorthing] = vertices[0]
-    anchorLongitude = bounds.west + ((anchorEasting - minEasting) / eastWestSpan) * (bounds.east - bounds.west)
-    anchorLatitude = bounds.south + ((anchorNorthing - minNorthing) / northSouthSpan) * (bounds.north - bounds.south)
     vertices.forEach((vertex, index) => {
       vertices[index] = [
         bounds.west + ((vertex[0] - minEasting) / eastWestSpan) * (bounds.east - bounds.west),
@@ -193,8 +186,7 @@ function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenc
     })
   }
 
-  const anchor = Cartographic.fromDegrees(anchorLongitude, anchorLatitude)
-  return { file, bounds, vertices, faces, anchor }
+  return { file, bounds, vertices, faces }
 }
 
 function parseCaldem2(file: string, bounds: ViewBounds, data: ArrayBuffer): DEMMesh {
@@ -211,9 +203,11 @@ function parseCaldem2(file: string, bounds: ViewBounds, data: ArrayBuffer): DEMM
   const columns = view.getUint32(12, true)
   const rows = view.getUint32(16, true)
   const vertexCount = view.getUint32(20, true)
+  const elevationOrigin = view.getFloat32(56, true)
   if (!columns || !rows || vertexCount !== columns * rows) {
     throw new Error(`DEM chunk ${file} has invalid grid dimensions.`)
   }
+  if (!Number.isFinite(elevationOrigin)) throw new Error(`DEM chunk ${file} has an invalid elevation origin.`)
   const expectedByteLength = headerSize + vertexCount * bytesPerVertex
   if (data.byteLength !== expectedByteLength) {
     throw new Error(`DEM chunk ${file} has invalid data length.`)
@@ -228,7 +222,7 @@ function parseCaldem2(file: string, bounds: ViewBounds, data: ArrayBuffer): DEMM
     if (![longitude, latitude, elevation].every(Number.isFinite)) {
       throw new Error(`DEM chunk ${file} contains invalid vertices.`)
     }
-    vertices.push([longitude, latitude, elevation])
+    vertices.push([longitude, latitude, elevation + elevationOrigin])
   }
 
   const [anchorLongitude, anchorLatitude] = vertices[0]
@@ -243,77 +237,42 @@ function parseCaldem2(file: string, bounds: ViewBounds, data: ArrayBuffer): DEMM
     vertices,
     faces: [],
     grid: { columns, rows },
-    anchor: Cartographic.fromDegrees(anchorLongitude, anchorLatitude),
   }
 }
 
-async function loadDEMMeshes(viewer: Viewer, selection: MapSelection): Promise<PositionedDEMMesh[]> {
+async function loadDEMMeshes(selection: MapSelection): Promise<DEMMesh[]> {
   const index = await getDEMChunksIndex()
   const chunks = getIntersectingChunks(index.chunks, selection)
   if (!chunks.length) throw new Error("No DEM chunks found in the current view.")
 
   const binaryFormat = index.mesh_format === "caldem2-v1"
   const georeferenced = index.mesh_coordinate_system === "EPSG:4326"
+  const indexedElevationOrigin = index.elevation_origin_meters
+  if (!binaryFormat && (indexedElevationOrigin === undefined || !Number.isFinite(indexedElevationOrigin))) {
+    throw new Error("The DEM index is missing its elevation origin.")
+  }
+  const elevationOrigin = indexedElevationOrigin ?? 0
   const meshes = await Promise.all(chunks.map(async ({ file, bounds: chunkBounds }) => {
     const response = await fetch(`${demChunksBaseUrl}${file}`)
     if (!response.ok) throw new Error(`Request failed (${response.status}): ${file}`)
     return binaryFormat
       ? parseCaldem2(file, chunkBounds, await response.arrayBuffer())
-      : parseDEMObj(file, chunkBounds, await response.text(), georeferenced)
+      : parseDEMObj(file, chunkBounds, await response.text(), georeferenced, elevationOrigin)
   }))
 
-  if (viewer.terrainProvider instanceof EllipsoidTerrainProvider) {
-    throw new Error("DEM OBJ export needs Cesium terrain to align chunk heights. Add a Cesium ion token and try again.")
-  }
-
-  const positions = meshes.map(({ anchor }) => anchor)
-  const terrainProvider = viewer.terrainProvider
-  const sampledPositions = terrainProvider.availability
-    ? await sampleTerrainMostDetailed(terrainProvider, positions)
-    : await sampleTerrain(terrainProvider, 12, positions)
-
-  if (sampledPositions.some((position) => !Number.isFinite(position.height))) {
-    throw new Error("Could not determine terrain height for some DEM chunks. Wait for terrain to load and try again.")
-  }
-
-  const offsets = meshes.map((mesh, index) => sampledPositions[index].height - mesh.vertices[0][2])
-  const sortedOffsets = offsets.slice().sort((a, b) => a - b)
-  const elevationOffset = sortedOffsets.length % 2
-    ? sortedOffsets[Math.floor(sortedOffsets.length / 2)]
-    : (sortedOffsets[sortedOffsets.length / 2 - 1] + sortedOffsets[sortedOffsets.length / 2]) / 2
-
-  return meshes.map((mesh) => ({
-    ...mesh,
-    elevationOffset,
-  }))
+  return meshes
 }
 
-export async function loadDEMExtent(viewer: Viewer, selection: MapSelection) {
+export async function loadDEMExtent(map: LeafletMap, selection: MapSelection) {
   const index = await getDEMChunksIndex()
   const chunks = getIntersectingChunks(index.chunks, selection)
-
-  viewer.entities.values
-    .filter((entity) => entity.id.startsWith(demExtentEntityPrefix))
-    .forEach((entity) => viewer.entities.remove(entity))
-
+  const layer = getMapOverlays(map).demExtents
+  layer.clearLayers()
   chunks.forEach(({ bounds: chunkBounds }, index) => {
-    viewer.entities.add({
-      id: `${demExtentEntityPrefix}${index}`,
-      name: "DEM chunk extent",
-      rectangle: {
-        coordinates: Rectangle.fromDegrees(
-          chunkBounds.west,
-          chunkBounds.south,
-          chunkBounds.east,
-          chunkBounds.north,
-        ),
-        height: 0,
-        heightReference: HeightReference.CLAMP_TO_GROUND,
-        material: Color.CYAN.withAlpha(0.12),
-        outline: true,
-        outlineColor: Color.CYAN,
-      },
-    })
+    L.rectangle(
+      [[chunkBounds.south, chunkBounds.west], [chunkBounds.north, chunkBounds.east]],
+      { color: "#00bcd4", weight: 1, fillColor: "#00bcd4", fillOpacity: 0.12 },
+    ).bindTooltip(`DEM chunk ${index + 1}`).addTo(layer)
   })
 
   return chunks.length
@@ -334,53 +293,45 @@ async function fetchTreesInArea(selection: MapSelection) {
   })
 }
 
-async function sampleTreeGroundHeights(viewer: Viewer, trees: TreeInView[]): Promise<TreeAtGround[]> {
+async function sampleTreeGroundHeights(meshes: DEMMesh[], trees: TreeInView[]): Promise<TreeAtGround[]> {
   if (trees.length === 0) return []
-  const terrainPositions = trees.map(({ longitude, latitude }) =>
-    Cartographic.fromDegrees(longitude, latitude),
-  )
-  const terrainProvider = viewer.terrainProvider
-  const sampledPositions = terrainProvider.availability
-    ? await sampleTerrainMostDetailed(terrainProvider, terrainPositions)
-    : await sampleTerrain(terrainProvider, 12, terrainPositions)
-
-  if (sampledPositions.some((position) => !Number.isFinite(position.height))) {
-    throw new Error("Could not determine ground elevation for some trees. Try again after terrain finishes loading.")
-  }
-
-  return trees.map((tree, index) => ({ ...tree, ground: sampledPositions[index].height }))
+  const sampleTerrain = createDEMPointSampler(meshes)
+  return trees.map((tree) => {
+    const ground = sampleTerrain(tree.longitude, tree.latitude)
+    if (ground === undefined || !Number.isFinite(ground)) {
+      throw new Error("Could not determine ground elevation for some trees from the DEM data.")
+    }
+    return { ...tree, ground }
+  })
 }
 
-export async function loadTreesInArea(viewer: Viewer, selection: MapSelection) {
+export async function loadTreesInArea(map: LeafletMap, selection: MapSelection) {
   const trees = await fetchTreesInArea(selection)
-  const treesAtGround = await sampleTreeGroundHeights(viewer, trees)
-
-  viewer.entities.values
-    .filter((entity) => entity.id.startsWith(treeEntityPrefix))
-    .forEach((entity) => viewer.entities.remove(entity))
-
-  for (const { tree, index, longitude, latitude, ground } of treesAtGround) {
-    viewer.entities.add({
-      id: `${treeEntityPrefix}${tree[":id"] ?? `${tree.tree_asset_cd ?? "record"}-${index}`}`,
-      name: tree.common_name ?? "Calgary tree",
-      position: Cartesian3.fromDegrees(longitude, latitude, ground + 2),
-      point: { pixelSize: 7, color: Color.DARKGREEN, outlineColor: Color.WHITE, outlineWidth: 1 },
-    })
+  const layer = getMapOverlays(map).trees
+  layer.clearLayers()
+  for (const { tree, longitude, latitude } of trees) {
+    L.circleMarker([latitude, longitude], {
+      radius: 4,
+      color: "#ffffff",
+      weight: 1,
+      fillColor: "#006400",
+      fillOpacity: 1,
+    }).bindTooltip(tree.common_name ?? "Calgary tree").addTo(layer)
   }
-  return treesAtGround.length
-}
-
-function getOuterRings(feature: BuildingFeature): Coordinate[][] {
-  const geometry = feature.geometry
-  if (geometry?.type === "Polygon") return [geometry.coordinates[0] ?? []]
-  if (geometry?.type === "MultiPolygon") return geometry.coordinates.map((polygon) => polygon[0] ?? [])
-  return []
+  return trees.length
 }
 
 function getAllRings(feature: BuildingFeature): Coordinate[][] {
   const geometry = feature.geometry
   if (geometry?.type === "Polygon") return geometry.coordinates
   if (geometry?.type === "MultiPolygon") return geometry.coordinates.flat()
+  return []
+}
+
+function getPolygonRings(feature: BuildingFeature): Coordinate[][][] {
+  const geometry = feature.geometry
+  if (geometry?.type === "Polygon") return [geometry.coordinates]
+  if (geometry?.type === "MultiPolygon") return geometry.coordinates
   return []
 }
 
@@ -394,32 +345,21 @@ function getGroundAndFallbackRoof(feature: BuildingFeature, rings: Coordinate[][
   return { ground, fallbackRoof: Math.max(roof, ground + 3) }
 }
 
-export async function loadBuildingsInArea(viewer: Viewer, selection: MapSelection) {
+export async function loadBuildingsInArea(map: LeafletMap, selection: MapSelection) {
   const features = await loadDetailedFeatures(selection)
-  viewer.entities.values
-    .filter((entity) => entity.id.startsWith(buildingEntityPrefix))
-    .forEach((entity) => viewer.entities.remove(entity))
-
+  const layer = getMapOverlays(map).buildings
+  layer.clearLayers()
   let count = 0
-  features.forEach((feature, featureIndex) => {
-    const rings = getOuterRings(feature)
-    if (!rings[0]?.length) return
-    const { ground, fallbackRoof } = getGroundAndFallbackRoof(feature, rings)
-    rings.forEach((ring, ringIndex) => {
-      const positions = ring.slice(0, -1).map(([longitude, latitude]) => Cartesian3.fromDegrees(longitude, latitude))
-      if (positions.length < 3) return
-      viewer.entities.add({
-        id: `${buildingEntityPrefix}${featureIndex}-${ringIndex}`,
-        name: `Calgary building ${featureIndex + 1}`,
-        polygon: {
-          hierarchy: new PolygonHierarchy(positions),
-          height: ground,
-          extrudedHeight: fallbackRoof,
-          material: Color.ORANGERED.withAlpha(0.8),
-          outline: true,
-          outlineColor: Color.WHITE,
-        },
-      })
+  features.forEach((feature) => {
+    getPolygonRings(feature).forEach((rings) => {
+      const positions = rings.map((ring) => ring.slice(0, -1).map(([longitude, latitude]) => [latitude, longitude] as L.LatLngTuple))
+      if (!positions[0] || positions[0].length < 3) return
+      L.polygon(positions, {
+        color: "#ffffff",
+        weight: 1,
+        fillColor: "#ff4500",
+        fillOpacity: 0.8,
+      }).addTo(layer)
       count++
     })
   })
@@ -428,7 +368,7 @@ export async function loadBuildingsInArea(viewer: Viewer, selection: MapSelectio
 
 type DEMSurface = (longitude: number, latitude: number) => number | undefined
 
-function createDEMPointSampler(meshes: PositionedDEMMesh[]): DEMSurface {
+function createDEMPointSampler(meshes: DEMMesh[]): DEMSurface {
   return (longitude, latitude) => {
     const bestMatch = meshes.find((mesh) =>
       longitude >= mesh.bounds.west && longitude <= mesh.bounds.east &&
@@ -447,7 +387,7 @@ function createDEMPointSampler(meshes: PositionedDEMMesh[]): DEMSurface {
       const elevationAt = (sampleRow: number, sampleColumn: number) => {
         const index = sampleRow * columns + sampleColumn
         const [, , elevation] = bestMatch!.vertices[index]
-        return elevation + bestMatch!.elevationOffset
+        return elevation
       }
       const top = elevationAt(row, column) * (1 - columnFraction) + elevationAt(row, column + 1) * columnFraction
       const bottom = elevationAt(row + 1, column) * (1 - columnFraction) + elevationAt(row + 1, column + 1) * columnFraction
@@ -460,7 +400,7 @@ function createDEMPointSampler(meshes: PositionedDEMMesh[]): DEMSurface {
       const distance = (sampleLongitude - longitude) ** 2 + (sampleLatitude - latitude) ** 2
       if (distance < nearestDistance) {
         nearestDistance = distance
-        nearestElevation = elevation + bestMatch.elevationOffset
+        nearestElevation = elevation
       }
     }
     return nearestElevation
@@ -536,13 +476,13 @@ function appendTreeCylinders(lines: string[], trees: TreeAtGround[], origin: [nu
 
 
 
-function appendDEMMeshes(lines: string[], meshes: PositionedDEMMesh[], origin: [number, number], firstVertexIndex: number) {
+function appendDEMMeshes(lines: string[], meshes: DEMMesh[], origin: [number, number], firstVertexIndex: number) {
   let vertexIndex = firstVertexIndex
   meshes.forEach((mesh) => {
     lines.push(`o terrain_${mesh.file.replace(/[^a-zA-Z0-9_-]/g, "_")}`)
     mesh.vertices.forEach(([longitude, latitude, elevation]) => {
       const local = toLocalMeters(longitude, latitude, origin)
-      lines.push(`v ${local.x.toFixed(3)} ${(elevation + mesh.elevationOffset).toFixed(3)} ${local.z.toFixed(3)}`)
+      lines.push(`v ${local.x.toFixed(3)} ${elevation.toFixed(3)} ${local.z.toFixed(3)}`)
     })
     if (mesh.grid) {
       const { columns, rows } = mesh.grid
@@ -566,7 +506,7 @@ function appendDEMMeshes(lines: string[], meshes: PositionedDEMMesh[], origin: [
 }
 // -------------------- OBJ EXPORT --------------------
 
-function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMeshes: PositionedDEMMesh[], bounds: ViewBounds) {
+function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMeshes: DEMMesh[], bounds: ViewBounds) {
   const firstRing = features.flatMap(getAllRings).find((ring) => ring.length)
   const origin: [number, number] = firstRing
     ? [firstRing[0][0], firstRing[0][1]]
@@ -623,12 +563,14 @@ function saveObj(features: BuildingFeature[], trees: TreeAtGround[], terrainMesh
   URL.revokeObjectURL(url)
 }
 
-export async function exportBuildingsObj(viewer: Viewer, selection: MapSelection) {
+export async function exportBuildingsObj(_map: LeafletMap, selection: MapSelection) {
   const bounds = getSelectionBounds(selection)
-  const features = await loadDetailedFeatures(selection)
-  const trees = await fetchTreesInArea(selection)
-  const treesAtGround = await sampleTreeGroundHeights(viewer, trees)
-  const terrainMeshes = await loadDEMMeshes(viewer, selection)
+  const [features, trees, terrainMeshes] = await Promise.all([
+    loadDetailedFeatures(selection),
+    fetchTreesInArea(selection),
+    loadDEMMeshes(selection),
+  ])
+  const treesAtGround = await sampleTreeGroundHeights(terrainMeshes, trees)
   saveObj(features, treesAtGround, terrainMeshes, bounds)
   return { buildingCount: features.length, treeCount: treesAtGround.length, terrainChunkCount: terrainMeshes.length }
 }

@@ -10,9 +10,9 @@
   },
   "dependencies": {
     "@radix-ui/react-slot": "latest",
-    "cesium": "^1.146.0",
     "class-variance-authority": "latest",
     "clsx": "latest",
+    "leaflet": "^1.9.4",
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^26.4.1",
     "@types/react": "latest",
     "@types/react-dom": "latest",
@@ -27,7 +28,6 @@
     "autoprefixer": "latest",
     "tailwindcss": "^4.3.3",
     "typescript": "latest",
-    "vite": "^8.3.5",
-    "vite-plugin-static-copy": "^4.1.1"
+    "vite": "^8.3.5"
   }
 }
