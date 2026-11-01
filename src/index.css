@@ -137,6 +137,11 @@
   cursor: wait;
 }
 
+.map-search button.clear-search {
+  width: 2.25rem;
+  border-left: 1px solid hsl(var(--border));
+}
+
 .map-search-error {
   flex-basis: 100%;
   margin: 0;
@@ -150,6 +155,7 @@
   position: absolute;
   top: 1rem;
   right: 1rem;
+  bottom: 1rem;
   z-index: 10;
   width: min(22rem, calc(100vw - 2.5rem));
   max-height: calc(100vh - 2.5rem);
@@ -260,7 +266,8 @@
 }
 
 .controls button {
-  min-height: 2.85rem;
+  min-height: 2.25rem;
+  padding: 0.5rem 0.75rem;
   /* border-radius: 0.7rem; */
   /* background-color: #111; */
   border-color: #111;
@@ -278,6 +285,16 @@
   transform: translateY(-1px);
   background-color: black;
   color: white;
+}
+
+.controls button.overlay-toggle[aria-pressed="true"] {
+  background-color: #000;
+  color: #fff;
+}
+
+.controls button.overlay-toggle[aria-pressed="true"]:not(:disabled):hover {
+  background-color: #fff;
+  color: #000;
 }
 
 .controls button.export-button {
@@ -332,6 +349,12 @@
   border-color: #bfd9e7;
   background: #eff8fc;
   color: #24566f;
+}
+
+.status.cancelled {
+  border-color: hsl(var(--border));
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 @media (max-width: 480px) {
