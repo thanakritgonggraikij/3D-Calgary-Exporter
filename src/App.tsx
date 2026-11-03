@@ -1,5 +1,5 @@
-import { useRef, useState, type FormEvent } from "react"
-import { Download, Layers3, LoaderCircle, Mountain, Route, Search, Trees, X } from "lucide-react"
+import { useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from "react"
+import { ChevronDown, ChevronUp, Download, GripHorizontal, Layers3, LoaderCircle, Mountain, Route, Search, Trees, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import LeafletViewer from "@/map/LeafletViewer"
@@ -8,6 +8,7 @@ import type { MapOverlayName, MapSelection } from "@/map/data"
 import type { Map as LeafletMap } from "leaflet"
 
 type PlaceSearchResult = { lat: string; lon: string }
+type DrawerStyle = CSSProperties & { "--drawer-height": string }
 
 const initialOverlayVisibility: Record<MapOverlayName, boolean> = {
   buildings: false,
@@ -26,6 +27,12 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
+  const [howToUseOpen, setHowToUseOpen] = useState(() => window.matchMedia("(min-width: 768px)").matches)
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
+  const [drawerDragHeight, setDrawerDragHeight] = useState<number | null>(null)
+  const controlsRef = useRef<HTMLElement>(null)
+  const drawerDragRef = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null)
+  const suppressDrawerClickRef = useRef(false)
   const lastSearchAtRef = useRef(0)
   const activeActionControllerRef = useRef<AbortController | null>(null)
   const loadedOverlaySelectionsRef = useRef<Partial<Record<MapOverlayName, string>>>({})
@@ -134,6 +141,62 @@ export default function App() {
     activeActionControllerRef.current?.abort()
   }
 
+  function startDrawerDrag(event: PointerEvent<HTMLButtonElement>) {
+    if (!window.matchMedia("(max-width: 767px)").matches || event.button !== 0 || !controlsRef.current) return
+    drawerDragRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight: controlsRef.current.getBoundingClientRect().height,
+    }
+    suppressDrawerClickRef.current = false
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function moveDrawerDrag(event: PointerEvent<HTMLButtonElement>) {
+    const drag = drawerDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const nextHeight = Math.max(96, Math.min(window.innerHeight * 0.88, drag.startHeight + drag.startY - event.clientY))
+    if (Math.abs(event.clientY - drag.startY) > 6) suppressDrawerClickRef.current = true
+    setDrawerDragHeight(nextHeight)
+  }
+
+  function endDrawerDrag(event: PointerEvent<HTMLButtonElement>) {
+    const drag = drawerDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const height = Math.max(96, Math.min(window.innerHeight * 0.88, drag.startHeight + drag.startY - event.clientY))
+    setMobileDrawerOpen(height > Math.max(150, window.innerHeight * 0.32))
+    setDrawerDragHeight(null)
+    drawerDragRef.current = null
+    if (suppressDrawerClickRef.current) {
+      window.setTimeout(() => {
+        suppressDrawerClickRef.current = false
+      }, 0)
+    }
+  }
+
+  function cancelDrawerDrag() {
+    drawerDragRef.current = null
+    setDrawerDragHeight(null)
+    suppressDrawerClickRef.current = false
+  }
+
+  function toggleMobileDrawer() {
+    if (suppressDrawerClickRef.current) {
+      suppressDrawerClickRef.current = false
+      return
+    }
+    setMobileDrawerOpen((open) => !open)
+  }
+
+  const drawerExpanded = drawerDragHeight === null
+    ? mobileDrawerOpen
+    : drawerDragHeight > Math.max(150, window.innerHeight * 0.32)
+  const drawerStyle: DrawerStyle = {
+    "--drawer-height": drawerDragHeight === null
+      ? mobileDrawerOpen ? "min(65dvh, 52rem)" : "6rem"
+      : `${drawerDragHeight}px`,
+  }
+
   return (
     <main className="app-shell">
       <LeafletViewer
@@ -142,11 +205,25 @@ export default function App() {
         onSelectionChange={setSelection}
         searchedLocation={searchedLocation}
       />
-      <aside className="controls">
+      <aside ref={controlsRef} className={`controls${drawerExpanded ? " is-mobile-open" : ""}${drawerDragRef.current ? " is-dragging" : ""}`} style={drawerStyle}>
         <Card>
           <CardHeader>
+            <button
+              type="button"
+              className="drawer-toggle"
+              aria-label={mobileDrawerOpen ? "Collapse controls drawer" : "Open controls drawer"}
+              aria-expanded={drawerExpanded}
+              onClick={toggleMobileDrawer}
+              onPointerDown={startDrawerDrag}
+              onPointerMove={moveDrawerDrag}
+              onPointerUp={endDrawerDrag}
+              onPointerCancel={cancelDrawerDrag}
+            >
+              <GripHorizontal aria-hidden="true" />
+              <span>{mobileDrawerOpen ? "close" : "open"}</span>
+              {drawerExpanded ? <ChevronDown aria-hidden="true" /> : <ChevronUp aria-hidden="true" />}
+            </button>
             <CardTitle className="controls-title">Context Exporter</CardTitle>
-            <p className="controls-subtitle">Calgary Only</p>
           </CardHeader>
 
 
@@ -183,13 +260,23 @@ export default function App() {
 
 
             <hr></hr>
-            <h3>How To Use</h3>
-
-            <ol className="export-steps">
-              <li>Click the map to choose an export center.</li>
-              <li>Optionally preview trees, buildings, and terrain.</li>
-              <li>Select Export .OBJ to download the file for Blender.</li>
-            </ol>
+            <button
+              type="button"
+              className="how-to-use-toggle"
+              aria-expanded={howToUseOpen}
+              aria-controls="how-to-use-content"
+              onClick={() => setHowToUseOpen((open) => !open)}
+            >
+              <span>How To Use</span>
+              {howToUseOpen ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
+            </button>
+            {howToUseOpen && (
+              <ol className="export-steps" id="how-to-use-content">
+                <li>Click the map to choose an export center.</li>
+                <li>Optionally preview trees, buildings, and terrain.</li>
+                <li>Select Export .OBJ to download the file for Blender.</li>
+              </ol>
+            )}
 
             <hr></hr>
             <h3>Show Elements On Map</h3>

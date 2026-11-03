@@ -167,6 +167,10 @@
   border: 2px solid rgba(0, 0, 0, 0.72);
 }
 
+.controls .drawer-toggle {
+  display: none;
+}
+
 .controls > div {
   overflow: hidden;
   border: 2px solid rgb(255 255 255 / 72%);
@@ -209,6 +213,34 @@
   letter-spacing: 0.09em;
   line-height: 1.4;
   text-transform: none;
+}
+
+.controls .how-to-use-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.controls .how-to-use-toggle:not(:disabled):hover {
+  transform: none;
+  background: transparent;
+  color: hsl(var(--foreground));
+}
+
+.controls .how-to-use-toggle svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
 }
 
 .controls > div > div:nth-child(2) {
@@ -357,11 +389,163 @@
   color: hsl(var(--muted-foreground));
 }
 
-@media (max-width: 480px) {
+@media (min-width: 768px) and (max-width: 1024px) {
   .controls {
     top: 0.75rem;
-    left: 0.75rem;
-    width: calc(100vw - 1.5rem);
-    max-height: calc(100vh - 1.5rem);
+    right: 0.75rem;
+    bottom: 0.75rem;
+    width: min(20rem, calc(100vw - 1.5rem));
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  .controls .controls-title {
+    font-size: 2.4rem;
+  }
+
+  .controls > div > div:first-child {
+    padding: 1.15rem 1.15rem 0.85rem;
+  }
+
+  .controls > div > div:nth-child(2) {
+    padding: 0 1.15rem 1.15rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .controls {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: var(--drawer-height, 6rem);
+    max-height: none;
+    overflow: hidden;
+    padding: 0;
+    border: 0;
+    border-top: 2px solid rgba(0, 0, 0, 0.72);
+    border-radius: 0;
+    box-shadow: 0 -0.5rem 1.5rem rgb(18 43 48 / 16%);
+    transition: height 220ms ease;
+  }
+
+  .controls.is-dragging {
+    transition: none;
+  }
+
+  .controls > div {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .controls > div > div:first-child {
+    flex: 0 0 auto;
+    gap: 0.1rem;
+    padding: 0.3rem 0.85rem 0.55rem;
+  }
+
+  .controls > div > div:nth-child(2) {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 0.85rem calc(0.75rem + env(safe-area-inset-bottom));
+  }
+
+  .controls:not(.is-mobile-open) > div > div:nth-child(2) {
+    display: none;
+  }
+
+  .controls .drawer-toggle {
+    display: flex;
+    width: 100%;
+    min-height: 1.35rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.85rem;
+    line-height: 1;
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .controls .drawer-toggle:active {
+    cursor: grabbing;
+  }
+
+  .controls .drawer-toggle:not(:disabled):hover {
+    transform: none;
+    background: transparent;
+    color: hsl(var(--foreground));
+  }
+
+  .controls .drawer-toggle svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .controls .controls-title {
+    font-size: clamp(1.6rem, 7vw, 2rem);
+    line-height: 1;
+  }
+
+  .controls .controls-subtitle {
+    font-size: 0.95rem;
+    line-height: 1.1;
+  }
+
+  .controls h3 {
+    font-size: 0.9rem;
+  }
+
+  .controls button {
+    min-height: 2.65rem;
+    font-size: 0.875rem;
+  }
+
+  .map-search input {
+    min-height: 2.65rem;
+    font-size: 1rem;
+  }
+
+  .controls .export-steps li {
+    font-size: 0.9rem;
+  }
+
+  .controls .status {
+    padding: 0.6rem 0.7rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .controls > div > div:first-child {
+    padding-right: 0.7rem;
+    padding-left: 0.7rem;
+  }
+
+  .controls > div > div:nth-child(2) {
+    padding-right: 0.7rem;
+    padding-left: 0.7rem;
+  }
+
+  .controls button {
+    padding: 0.4rem 0.55rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .controls {
+    transition: none;
   }
 }
