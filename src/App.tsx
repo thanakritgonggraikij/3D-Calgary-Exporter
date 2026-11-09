@@ -1,5 +1,5 @@
 import { useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from "react"
-import { ChevronDown, ChevronUp, Download, GripHorizontal, Layers3, LoaderCircle, Mountain, RectangleHorizontal, Route, Search, Trees, X } from "lucide-react"
+import { ChevronDown, ChevronUp, Download, Eye, EyeOff, GripHorizontal, House, Layers3, ListChecks, LoaderCircle, Mountain, RectangleHorizontal, Route, Search, Trees, X, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import LeafletViewer from "@/map/LeafletViewer"
@@ -18,17 +18,42 @@ const initialOverlayVisibility: Record<MapOverlayName, boolean> = {
   parcels: false,
 }
 
+const initialExportSelection: Record<MapOverlayName, boolean> = {
+  buildings: true,
+  trees: true,
+  terrain: true,
+  roads: true,
+  parcels: true,
+}
+
+type LayerControl = {
+  name: MapOverlayName
+  label: string
+  Icon: LucideIcon
+  load: (map: LeafletMap, selection: MapSelection, signal: AbortSignal) => Promise<number>
+  successMessage: (count: number) => string
+}
+
+const layerControls: LayerControl[] = [
+  { name: "buildings", label: "Buildings", Icon: House, load: loadBuildingsInArea, successMessage: (count) => `Loaded ${count} detailed buildings` },
+  { name: "terrain", label: "Terrain", Icon: Mountain, load: loadDEMExtent, successMessage: (count) => `Loaded ${count} DEM chunk extents` },
+  { name: "roads", label: "Roads", Icon: Route, load: loadRoadsInArea, successMessage: (count) => `Loaded ${count} road polylines` },
+  { name: "parcels", label: "Parcels", Icon: RectangleHorizontal, load: loadParcelsInArea, successMessage: (count) => `Loaded ${count} parcel boundaries` },
+  { name: "trees", label: "Trees", Icon: Trees, load: loadTreesInArea, successMessage: (count) => `Loaded ${count} trees` },
+]
+
 export default function App() {
   const [map, setMap] = useState<LeafletMap | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [visibleOverlays, setVisibleOverlays] = useState(initialOverlayVisibility)
+  const [exportSelection, setExportSelection] = useState(initialExportSelection)
   const [status, setStatus] = useState<{ message: string; type: "success" | "error" | "loading" | "cancelled" } | null>(null)
   const [selection, setSelection] = useState<MapSelection>({ longitude: -114.0525, latitude: 51.0525 })
   const [searchedLocation, setSearchedLocation] = useState<MapSelection | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
-  const [howToUseOpen, setHowToUseOpen] = useState(() => window.matchMedia("(min-width: 768px)").matches)
+  const [howToUseOpen, setHowToUseOpen] = useState(false)
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
   const [drawerDragHeight, setDrawerDragHeight] = useState<number | null>(null)
   const controlsRef = useRef<HTMLElement>(null)
@@ -227,10 +252,7 @@ export default function App() {
             <CardTitle className="controls-title">Context Exporter</CardTitle>
           </CardHeader>
 
-
-
           <CardContent className="space-y-3">
-
 
             <form className="map-search" onSubmit={(event) => void searchPlace(event)}>
               <label className="sr-only" htmlFor="place-search">Search a place or address</label>
@@ -268,54 +290,61 @@ export default function App() {
               aria-controls="how-to-use-content"
               onClick={() => setHowToUseOpen((open) => !open)}
             >
-              <span>How To Use</span>
+              <span><h3>How To Use</h3></span>
               {howToUseOpen ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
             </button>
             {howToUseOpen && (
               <ol className="export-steps" id="how-to-use-content">
                 <li>Click the map to choose an export center.</li>
-                <li>Optionally preview property lines, trees, buildings, and terrain.</li>
+                <li>Use the list and eye icons to choose what to export and render on the map.</li>
                 <li>Select Export .OBJ to download the file for Blender.</li>
               </ol>
             )}
 
             <hr></hr>
-            <h3>Show Elements On Map</h3>
-
-            <div className="flex flex-col gap-1">
-
-              <Button variant="outline" className="overlay-toggle w-full justify-start" aria-pressed={visibleOverlays.buildings} disabled={!map || busy !== null} onClick={() => void toggleOverlay("buildings", loadBuildingsInArea, (count) => `Loaded ${count} detailed buildings`)}>
-                {busy === "buildings" ? <LoaderCircle className="animate-spin" /> : <Layers3 />}
-                BUILDINGS
-              </Button>
-              <Button variant="outline" className="overlay-toggle w-full justify-start" aria-pressed={visibleOverlays.terrain} disabled={!map || busy !== null} onClick={() => void toggleOverlay("terrain", loadDEMExtent, (count) => `Loaded ${count} DEM chunk extents`)}>
-                {busy === "terrain" ? <LoaderCircle className="animate-spin" /> : <Mountain />}
-                TERRAIN
-              </Button>
-
-              <Button variant="outline" className="overlay-toggle w-full justify-start" aria-pressed={visibleOverlays.roads} disabled={!map || busy !== null} onClick={() => void toggleOverlay("roads", loadRoadsInArea, (count) => `Loaded ${count} road polylines`)}>
-                {busy === "roads" ? <LoaderCircle className="animate-spin" /> : <Route />}
-                ROADS
-              </Button>
-
-              <Button variant="outline" className="overlay-toggle w-full justify-start" aria-pressed={visibleOverlays.parcels} disabled={!map || busy !== null} onClick={() => void toggleOverlay("parcels", loadParcelsInArea, (count) => `Loaded ${count} parcel boundaries`)}>
-                {busy === "parcels" ? <LoaderCircle className="animate-spin" /> : <RectangleHorizontal />}
-                PARCELS
-              </Button>
-
-              <Button variant="outline" className="overlay-toggle w-full justify-start" aria-pressed={visibleOverlays.trees} disabled={!map || busy !== null} onClick={() => void toggleOverlay("trees", loadTreesInArea, (count) => `Loaded ${count} trees`)}>
-                {busy === "trees" ? <LoaderCircle className="animate-spin" /> : <Trees />}
-                TREES
-              </Button>
-
-
-
+            <div className="layer-controls" role="group" aria-label="Export selection and map visibility">
+              <div className="layer-control-header">
+                <h3 title="Element List" style={{ width: "100%", textAlign: "left" }}>Map Elements</h3>
+                <span title="Queue for export" role="img" aria-label="Queue for export"><ListChecks /></span>
+                <span title="Toggle Render on Map" role="img" aria-label="Toggle Render on Map"><Eye /></span>
+              </div>
+              {layerControls.map(({ name, label, Icon, load, successMessage }) => (
+                <div className="layer-control-row" key={name}>
+                  <span className="layer-control-name"><Icon aria-hidden="true" />{label}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="layer-toggle-icon"
+                    aria-label={`${exportSelection[name] ? "Remove" : "Add"} ${label} ${exportSelection[name] ? "from" : "to"} export`}
+                    aria-pressed={exportSelection[name]}
+                    title={`${exportSelection[name] ? "Selected" : "Not selected"} for export`}
+                    disabled={busy !== null}
+                    onClick={() => setExportSelection((current) => ({ ...current, [name]: !current[name] }))}
+                  >
+                    <Download aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="layer-toggle-icon"
+                    aria-label={`${visibleOverlays[name] ? "Hide" : "Render"} ${label} on map`}
+                    aria-pressed={visibleOverlays[name]}
+                    title={`${visibleOverlays[name] ? "Rendered" : "Not rendered"} on map`}
+                    disabled={!map || busy !== null}
+                    onClick={() => void toggleOverlay(name, load, successMessage)}
+                  >
+                    {busy === name ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : visibleOverlays[name] ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
+                  </Button>
+                </div>
+              ))}
             </div>
             <hr></hr>
 
             <h3>Export</h3>
 
-            <Button variant="secondary" className="export-button w-full justify-start" disabled={!map || busy !== null} onClick={() => void runAction("obj", exportBuildingsObj, ({ buildingCount, treeCount, roadCount, terrainChunkCount }) => `Exported OBJ with ${buildingCount} buildings, ${treeCount} trees, ${roadCount} road polylines, and ${terrainChunkCount} terrain chunks`)}>
+            <Button variant="secondary" className="export-button w-full justify-start" disabled={!map || busy !== null || !Object.values(exportSelection).some(Boolean)} onClick={() => void runAction("obj", (currentMap, currentSelection, signal) => exportBuildingsObj(currentMap, currentSelection, signal, exportSelection), ({ buildingCount, treeCount, roadCount, parcelCount, terrainChunkCount }) => `Exported OBJ with ${buildingCount} buildings, ${treeCount} trees, ${roadCount} road polylines, ${parcelCount} parcel boundaries, and ${terrainChunkCount} terrain chunks`)}>
               {busy === "obj" ? <LoaderCircle className="animate-spin" /> : <Download />}
               .OBJ (BLENDER/SKP)
             </Button>
