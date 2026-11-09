@@ -1,7 +1,9 @@
 import * as L from "leaflet"
 import type { Map as LeafletMap } from "leaflet"
+import type { FeatureCollection, MultiPolygon, Polygon } from "geojson"
 
 const treesApi = "https://data.calgary.ca/resource/tfs4-3wwa.json"
+const parcelsApi = "https://services1.arcgis.com/AVP60cs0Q9PEA8rH/ArcGIS/rest/services/Parcel_with_Roll_2026/FeatureServer/0/query"
 const roadsGeoJsonBaseUrl = "https://pub-a06088b43d4e4619a6b98a66771604cf.r2.dev/"
 const chunksBaseUrl = "https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_chunks/"
 const demChunksBaseUrl = "https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_chunks/"
@@ -69,13 +71,15 @@ type RoadFeature = {
   properties?: Record<string, unknown>
   geometry?: { type: string; coordinates: unknown }
 }
+type ParcelGeometry = Polygon | MultiPolygon
+type ParcelFeatureCollection = FeatureCollection<ParcelGeometry>
 
 let chunksIndexPromise: Promise<ChunksIndex> | undefined
 let demChunksIndexPromise: Promise<DEMChunksIndex> | undefined
 const chunkCache = new Map<string, BuildingFeature[]>()
 const roadFileTextCache = new Map<string, Promise<string>>()
 const roadSelectionCache = new Map<string, Promise<Road[]>>()
-type MapOverlays = { trees: L.LayerGroup; buildings: L.LayerGroup; demExtents: L.LayerGroup; roads: L.LayerGroup }
+type MapOverlays = { trees: L.LayerGroup; buildings: L.LayerGroup; demExtents: L.LayerGroup; roads: L.LayerGroup; parcels: L.LayerGroup }
 const mapOverlays = new WeakMap<LeafletMap, MapOverlays>()
 
 function getMapOverlays(map: LeafletMap): MapOverlays {
@@ -86,6 +90,7 @@ function getMapOverlays(map: LeafletMap): MapOverlays {
       buildings: L.layerGroup().addTo(map),
       demExtents: L.layerGroup().addTo(map),
       roads: L.layerGroup().addTo(map),
+      parcels: L.layerGroup().addTo(map),
     }
     mapOverlays.set(map, overlays)
   }
@@ -481,6 +486,74 @@ export async function loadRoadsInArea(map: LeafletMap, selection: MapSelection, 
   return roads.length
 }
 
+async function fetchParcelsInArea(selection: MapSelection, signal?: AbortSignal) {
+  const bounds = getSelectionBounds(selection)
+  const params = new URLSearchParams({
+    where: "1=1",
+    geometry: `${bounds.west},${bounds.south},${bounds.east},${bounds.north}`,
+    geometryType: "esriGeometryEnvelope",
+    inSR: "4326",
+    spatialRel: "esriSpatialRelIntersects",
+    outFields: "OBJECTID",
+    returnGeometry: "true",
+    outSR: "4326",
+    resultRecordCount: "2000",
+    orderByFields: "OBJECTID ASC",
+    f: "geojson",
+  })
+  const features: ParcelFeatureCollection["features"] = []
+  const pageSize = 2000
+  let resultOffset = 0
+
+  while (true) {
+    signal?.throwIfAborted()
+    params.set("resultOffset", String(resultOffset))
+    const response = await fetch(`${parcelsApi}?${params}`, { signal })
+    if (!response.ok) throw new Error(`Parcel data request failed (${response.status}).`)
+
+    const result = await response.json() as {
+      features?: unknown
+      exceededTransferLimit?: boolean
+      error?: { code?: number; message?: string }
+    }
+    if (result.error) {
+      throw new Error(`Parcel data request failed${result.error.code ? ` (${result.error.code})` : ""}: ${result.error.message ?? "Unknown ArcGIS error."}`)
+    }
+    if (!Array.isArray(result.features)) throw new Error("Parcel data request returned an invalid GeoJSON feature collection.")
+
+    const page = result.features as ParcelFeatureCollection["features"]
+    if (page.length === 0) {
+      if (result.exceededTransferLimit) throw new Error("Parcel data request was truncated by the ArcGIS service.")
+      break
+    }
+    features.push(...page)
+    if (page.length < pageSize && !result.exceededTransferLimit) break
+    resultOffset += page.length
+  }
+
+  signal?.throwIfAborted()
+  return features
+}
+
+export async function loadParcelsInArea(map: LeafletMap, selection: MapSelection, signal?: AbortSignal) {
+  const features = await fetchParcelsInArea(selection, signal)
+  const collection: ParcelFeatureCollection = { type: "FeatureCollection", features }
+  const renderer = L.canvas()
+  const parcels = L.geoJSON(collection, {
+    style: {
+      color: "#304462",
+      weight: 1,
+      opacity: 0.5,
+      fill: false,
+      renderer,
+    },
+  })
+  const layer = getMapOverlays(map).parcels
+  layer.clearLayers()
+  layer.addLayer(parcels)
+  return features.length
+}
+
 function getAllRings(feature: BuildingFeature): Coordinate[][] {
   const geometry = feature.geometry
   if (geometry?.type === "Polygon") return geometry.coordinates
@@ -528,7 +601,8 @@ export async function loadBuildingsInArea(map: LeafletMap, selection: MapSelecti
 
 type DEMSurface = (longitude: number, latitude: number) => number | undefined
 
-export type MapOverlayName = "buildings" | "trees" | "terrain" | "roads"
+export type MapOverlayName = "buildings" | "trees" | "terrain" | "roads" | "parcels"
+export type ExportSelection = Record<MapOverlayName, boolean>
 
 export function setMapOverlayVisibility(map: LeafletMap, name: MapOverlayName, visible: boolean) {
   const overlays = getMapOverlays(map)
@@ -755,6 +829,54 @@ async function appendRoadPolylines(
   return vertexIndex
 }
 
+async function appendParcelBoundaries(
+  lines: string[],
+  parcels: ParcelFeatureCollection["features"],
+  origin: [number, number],
+  firstVertexIndex: number,
+  sampleTerrain: DEMSurface,
+  bounds: ViewBounds,
+  signal: AbortSignal,
+) {
+  let vertexIndex = firstVertexIndex
+  let parcelCount = 0
+  let processedItems = 0
+  lines.push("g Parcels")
+
+  for (const [parcelIndex, feature] of parcels.entries()) {
+    if (processedItems > 0 && processedItems % 200 === 0) await yieldToBrowser(signal)
+    const geometry = feature.geometry
+    if (!geometry) continue
+    const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : [geometry.coordinates].flat()
+    let hasBoundary = false
+
+    for (const [ringIndex, ring] of polygons.flat().entries()) {
+      const coordinates = ring.map(([longitude, latitude]) => [latitude, longitude] as [number, number])
+      for (const [pathIndex, path] of clipRoadPath(coordinates, bounds).entries()) {
+        if (path.length < 2) continue
+        const pathIndices: number[] = []
+        lines.push(`o parcel_${String(feature.id ?? parcelIndex + 1).replace(/[^A-Za-z0-9_-]/g, "_")}_${ringIndex + 1}_${pathIndex + 1}`)
+        for (const [latitude, longitude] of path) {
+          const elevation = sampleTerrain(longitude, latitude)
+          if (elevation === undefined || !Number.isFinite(elevation)) {
+            throw new Error(`Could not drape parcel boundary ${feature.id ?? parcelIndex + 1} onto the DEM.`)
+          }
+          const local = toLocalMeters(longitude, latitude, origin)
+          lines.push(`v ${local.x.toFixed(3)} ${(elevation + 0.1).toFixed(3)} ${local.z.toFixed(3)}`)
+          pathIndices.push(vertexIndex++)
+        }
+        lines.push(`l ${pathIndices.join(" ")}`)
+        hasBoundary = true
+        processedItems++
+      }
+    }
+
+    if (hasBoundary) parcelCount++
+  }
+
+  return { vertexIndex, parcelCount }
+}
+
 async function appendDEMMeshes(
   lines: string[],
   meshes: DEMMesh[],
@@ -803,7 +925,9 @@ async function saveObj(
   features: BuildingFeature[],
   trees: TreeAtGround[],
   roads: Road[],
+  parcels: ParcelFeatureCollection["features"],
   terrainMeshes: DEMMesh[],
+  includeTerrain: boolean,
   bounds: ViewBounds,
   signal: AbortSignal,
 ) {
@@ -813,7 +937,7 @@ async function saveObj(
     : trees[0]
       ? [trees[0].longitude, trees[0].latitude]
       : [(bounds.west + bounds.east) / 2, (bounds.south + bounds.north) / 2]
-  const lines = ["# Calgary 3D Buildings", "# Coordinates are local metres: X=East, Y=Up, Z=North", `# Origin: ${origin[0].toFixed(6)}, ${origin[1].toFixed(6)}`, ""]
+  const lines = ["# Calgary 3D Context Export", "# Coordinates are local metres: X=East, Y=Up, Z=North", `# Origin: ${origin[0].toFixed(6)}, ${origin[1].toFixed(6)}`, ""]
   let vertexIndex = 1
 
   const sampleTerrain = createDEMPointSampler(terrainMeshes)
@@ -855,7 +979,8 @@ async function saveObj(
 
   const nextTreeVertexIndex = await appendTreeCylinders(lines, trees, origin, vertexIndex, sampleTerrain, signal)
   const nextRoadVertexIndex = await appendRoadPolylines(lines, roads, origin, nextTreeVertexIndex, sampleTerrain, signal)
-  await appendDEMMeshes(lines, terrainMeshes, origin, nextRoadVertexIndex, signal)
+  const parcelResult = await appendParcelBoundaries(lines, parcels, origin, nextRoadVertexIndex, sampleTerrain, bounds, signal)
+  if (includeTerrain) await appendDEMMeshes(lines, terrainMeshes, origin, parcelResult.vertexIndex, signal)
 
   signal.throwIfAborted()
   const blob = new Blob([`${lines.join("\n")}\n`], { type: "text/plain" })
@@ -866,19 +991,33 @@ async function saveObj(
   link.download = `calgary_context_${Date.now()}.obj`
   link.click()
   URL.revokeObjectURL(url)
+  return parcelResult.parcelCount
 }
 
-export async function exportBuildingsObj(_map: LeafletMap, selection: MapSelection, signal: AbortSignal) {
+export async function exportBuildingsObj(
+  _map: LeafletMap,
+  selection: MapSelection,
+  signal: AbortSignal,
+  exportSelection: ExportSelection,
+) {
   const bounds = getSelectionBounds(selection)
-  const [features, trees, roads, terrainMeshes] = await Promise.all([
-    loadDetailedFeatures(selection, signal),
-    fetchTreesInArea(selection, signal),
-    fetchRoadsInArea(selection, signal),
-    loadDEMMeshes(selection, signal),
+  const needsTerrainForHeights = exportSelection.trees || exportSelection.roads || exportSelection.parcels
+  const [features, trees, roads, parcels, terrainMeshes] = await Promise.all([
+    exportSelection.buildings ? loadDetailedFeatures(selection, signal) : Promise.resolve([]),
+    exportSelection.trees ? fetchTreesInArea(selection, signal) : Promise.resolve([]),
+    exportSelection.roads ? fetchRoadsInArea(selection, signal) : Promise.resolve([]),
+    exportSelection.parcels ? fetchParcelsInArea(selection, signal) : Promise.resolve([]),
+    exportSelection.terrain || needsTerrainForHeights ? loadDEMMeshes(selection, signal) : Promise.resolve([]),
   ])
   signal.throwIfAborted()
-  const treesAtGround = await sampleTreeGroundHeights(terrainMeshes, trees)
+  const treesAtGround = exportSelection.trees ? await sampleTreeGroundHeights(terrainMeshes, trees) : []
   signal.throwIfAborted()
-  await saveObj(features, treesAtGround, roads, terrainMeshes, bounds, signal)
-  return { buildingCount: features.length, treeCount: treesAtGround.length, roadCount: roads.length, terrainChunkCount: terrainMeshes.length }
+  const parcelCount = await saveObj(features, treesAtGround, roads, parcels, terrainMeshes, exportSelection.terrain, bounds, signal)
+  return {
+    buildingCount: features.length,
+    treeCount: treesAtGround.length,
+    roadCount: roads.length,
+    parcelCount,
+    terrainChunkCount: exportSelection.terrain ? terrainMeshes.length : 0,
+  }
 }
