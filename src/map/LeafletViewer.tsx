@@ -29,10 +29,6 @@ export default function LeafletViewer({ onReady, selection, onSelectionChange, s
   const jawgAccessToken = "g0AxIlVuwiLdCnTtl4xavfenRJWvV4Z9Mq29FsLOMlYZYjKa1Uwtxfu4TfzskiKN"
 
 
-
-
-
-
   useEffect(() => {
     const container = containerRef.current
     if (!container) return

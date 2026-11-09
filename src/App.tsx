@@ -1,9 +1,9 @@
 import { useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from "react"
-import { ChevronDown, ChevronUp, Download, GripHorizontal, Layers3, LoaderCircle, Mountain, Route, Search, Trees, X } from "lucide-react"
+import { ChevronDown, ChevronUp, Download, GripHorizontal, Layers3, LoaderCircle, Mountain, RectangleHorizontal, Route, Search, Trees, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import LeafletViewer from "@/map/LeafletViewer"
-import { exportBuildingsObj, loadBuildingsInArea, loadDEMExtent, loadRoadsInArea, loadTreesInArea, setMapOverlayVisibility } from "@/map/data"
+import { exportBuildingsObj, loadBuildingsInArea, loadDEMExtent, loadParcelsInArea, loadRoadsInArea, loadTreesInArea, setMapOverlayVisibility } from "@/map/data"
 import type { MapOverlayName, MapSelection } from "@/map/data"
 import type { Map as LeafletMap } from "leaflet"
 
@@ -15,6 +15,7 @@ const initialOverlayVisibility: Record<MapOverlayName, boolean> = {
   trees: false,
   terrain: false,
   roads: false,
+  parcels: false,
 }
 
 export default function App() {
@@ -273,7 +274,7 @@ export default function App() {
             {howToUseOpen && (
               <ol className="export-steps" id="how-to-use-content">
                 <li>Click the map to choose an export center.</li>
-                <li>Optionally preview trees, buildings, and terrain.</li>
+                <li>Optionally preview property lines, trees, buildings, and terrain.</li>
                 <li>Select Export .OBJ to download the file for Blender.</li>
               </ol>
             )}
@@ -297,6 +298,10 @@ export default function App() {
                 ROADS
               </Button>
 
+              <Button variant="outline" className="overlay-toggle w-full justify-start" aria-pressed={visibleOverlays.parcels} disabled={!map || busy !== null} onClick={() => void toggleOverlay("parcels", loadParcelsInArea, (count) => `Loaded ${count} parcel boundaries`)}>
+                {busy === "parcels" ? <LoaderCircle className="animate-spin" /> : <RectangleHorizontal />}
+                PARCELS
+              </Button>
 
               <Button variant="outline" className="overlay-toggle w-full justify-start" aria-pressed={visibleOverlays.trees} disabled={!map || busy !== null} onClick={() => void toggleOverlay("trees", loadTreesInArea, (count) => `Loaded ${count} trees`)}>
                 {busy === "trees" ? <LoaderCircle className="animate-spin" /> : <Trees />}
@@ -338,6 +343,8 @@ export default function App() {
               <b>Terrain: </b>City of Calgary Open Data Portal (https://data.calgary.ca/Base-Maps/Digital-Elevation-Model-DEM-ASCII-2m/eink-tu9p/about_data) <br />
               <br></br>
               <b>Roads: </b>OpenStreetMap contributors via the Overpass API (https://overpass-api.de/) <br />
+              <br></br>
+              <b>Property lines: </b>City of Calgary Parcel with Roll 2026 (https://services1.arcgis.com/AVP60cs0Q9PEA8rH/ArcGIS/rest/services/Parcel_with_Roll_2026/FeatureServer/0) <br />
             </p>
           </CardContent>
         </Card>
