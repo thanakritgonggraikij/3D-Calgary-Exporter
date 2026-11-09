@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from "react"
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from "react"
 import { ChevronDown, ChevronUp, Download, GripHorizontal, Layers3, LoaderCircle, Mountain, Route, Search, Trees, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,14 +28,24 @@ export default function App() {
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [howToUseOpen, setHowToUseOpen] = useState(() => window.matchMedia("(min-width: 768px)").matches)
+  const [moreInfoOpen, setMoreInfoOpen] = useState(false)
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
   const [drawerDragHeight, setDrawerDragHeight] = useState<number | null>(null)
   const controlsRef = useRef<HTMLElement>(null)
+  const moreInfoDialogRef = useRef<HTMLDialogElement>(null)
   const drawerDragRef = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null)
   const suppressDrawerClickRef = useRef(false)
   const lastSearchAtRef = useRef(0)
   const activeActionControllerRef = useRef<AbortController | null>(null)
   const loadedOverlaySelectionsRef = useRef<Partial<Record<MapOverlayName, string>>>({})
+
+  useEffect(() => {
+    const dialog = moreInfoDialogRef.current
+    if (!dialog) return
+
+    if (moreInfoOpen && !dialog.open) dialog.showModal()
+    if (!moreInfoOpen && dialog.open) dialog.close()
+  }, [moreInfoOpen])
 
   async function searchPlace(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -205,7 +215,15 @@ export default function App() {
         onSelectionChange={setSelection}
         searchedLocation={searchedLocation}
       />
+
       <aside ref={controlsRef} className={`controls${drawerExpanded ? " is-mobile-open" : ""}${drawerDragRef.current ? " is-dragging" : ""}`} style={drawerStyle}>
+        <Button
+          variant="outline"
+          className="purpose-trigger"
+          onClick={() => setMoreInfoOpen(true)}
+        >
+          PURPOSE +
+        </Button>
         <Card>
           <CardHeader>
             <button
@@ -223,13 +241,10 @@ export default function App() {
               <span>{mobileDrawerOpen ? "close" : "open"}</span>
               {drawerExpanded ? <ChevronDown aria-hidden="true" /> : <ChevronUp aria-hidden="true" />}
             </button>
-            <CardTitle className="controls-title">Context Exporter</CardTitle>
+            <CardTitle className="title">Context Exporter</CardTitle>
           </CardHeader>
 
-
-
           <CardContent className="space-y-3">
-
 
             <form className="map-search" onSubmit={(event) => void searchPlace(event)}>
               <label className="sr-only" htmlFor="place-search">Search a place or address</label>
@@ -342,6 +357,71 @@ export default function App() {
           </CardContent>
         </Card>
       </aside>
+
+      <dialog
+        ref={moreInfoDialogRef}
+        className="purpose-dialog"
+        aria-labelledby="purpose-title"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) setMoreInfoOpen(false)
+        }}
+        onClose={() => setMoreInfoOpen(false)}
+      >
+        <header className="purpose-header">
+          <h2>Purpose</h2>
+          <button
+            type="button"
+            className="purpose-close"
+            aria-label="Close more information"
+            onClick={() => setMoreInfoOpen(false)}
+          >
+            <X aria-hidden="true" />
+          </button>
+        </header>
+
+
+        <section className="purpose-goal" aria-labelledby="purpose-goal-title">
+          <h3 id="purpose-goal-title">Summary</h3>
+          <p>Existing 3D datasets for Calgary are limited only to fill-extrusions; meaning that roof, facade, and terrain geometries lack high definition details.
+          </p>
+          <p>
+            By hosting 3D LiDAR datasets then serving it in 800m x 800m geographic chunks, architectural design teams could extract high-fidelity 3D contexts such as buildings (LiDAR), digital elevation models (DEM, at detailed 2m resolutions), trees, etc. as standard Wavefront .OBJ format. Wavefront .OBJs can be directly edited in Blender and/or Sketchup during feasibility/schematic design phases and architectural visualizations.
+          </p>
+
+          <h3 id="purpose-goal-title">The Goal</h3>
+          <p>To systematically extract 3D geospatial contexts at high resolution, for feasibility &amp; schematic design.</p>
+        </section>
+
+        <img
+          className="purpose-main-image"
+          src="https://freight.cargo.site/w/2031/q/75/i/C3197086206877491784617575368955/internal-gis_detail-2.jpg"
+          alt="Detailed 3D geospatial context"
+        />
+        <div className="purpose-images">
+          <img
+            className="image-placeholder"
+            src="https://freight.cargo.site/w/800/q/75/i/Z3205669143617663659274031122683/after-high-def.jpg"
+            alt="Context Exporter 3D Building Results"
+          />
+          <img
+            className="image-placeholder"
+            src="https://freight.cargo.site/w/800/q/75/i/N3205667776695481053322546825467/before-low-def.jpg"
+            alt="Traditional Exporter 3D Building Results"
+          />
+          <img
+            className="image-placeholder"
+            src="https://freight.cargo.site/w/800/q/75/i/M3205669469977459811343418312955/after-high-dem.jpg"
+            alt="Context Exporter 3D Terrain Results"
+          />
+          <img
+            className="image-placeholder"
+            src="https://freight.cargo.site/w/800/q/75/i/D3205671343152086776179837159675/before-low-dem.jpg"
+            alt="Traditional Exporter 3D Terrain Results"
+          />
+
+        </div>
+
+      </dialog>
     </main>
   )
 }
