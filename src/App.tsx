@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from "react"
-import { ChevronDown, ChevronUp, Download, GripHorizontal, Layers3, LoaderCircle, Mountain, Route, Search, Trees, X } from "lucide-react"
+import { ChevronDown, ChevronUp, Download, Eye, EyeOff, GripHorizontal, House, Layers3, ListChecks, LoaderCircle, Mountain, RectangleHorizontal, Route, Search, Trees, X, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import LeafletViewer from "@/map/LeafletViewer"
@@ -53,7 +53,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
-  const [howToUseOpen, setHowToUseOpen] = useState(() => window.matchMedia("(min-width: 768px)").matches)
+  const [howToUseOpen, setHowToUseOpen] = useState(false)
   const [moreInfoOpen, setMoreInfoOpen] = useState(false)
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
   const [drawerDragHeight, setDrawerDragHeight] = useState<number | null>(null)
