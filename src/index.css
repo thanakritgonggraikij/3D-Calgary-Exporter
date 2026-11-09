@@ -57,7 +57,7 @@
     --accent-foreground: 190 24% 16%;
     --border-color: #000000bf;
     --ring: 188 78% 29%;
-    --radius: 0rem;
+    --radius: 1rem;
   }
 
   html,
@@ -75,14 +75,14 @@
 
 .app-shell,
 .controls,
-.controls h3,
-.controls p,
-.controls ol,
+.h3,
+.p,
+.ol,
 .status,
 .map-error,
-.controls button,
-.controls button *,
-.controls code {
+.button,
+.button *,
+.code {
   font-family: "ABC Monument Grotesk", Arial, sans-serif;
 }
 
@@ -158,9 +158,9 @@
   z-index: 10;
   width: min(22rem, calc(100vw - 2.5rem));
   max-height: calc(100vh - 2.5rem);
-  overflow-y: auto;
+  overflow: visible;
   font-family: "ABC Monument Grotesk", Arial, sans-serif;
-  border-radius: 1rem;
+  border-radius: var(--radius);
   scrollbar-width: thin;
   scrollbar-color: var(--border-color) transparent;
   border: 2px solid var(--border-color);
@@ -170,8 +170,12 @@
   display: none;
 }
 
-.controls > div {
+.controls>div {
+  height: 100%;
   overflow: hidden;
+  overflow-y: auto;
+  border: 2px solid rgb(255 255 255 / 72%);
+  /* border-radius: 1rem; */
   background: rgb(255 255 255 / 100%);
   box-shadow:
     0 1.5rem 4rem rgb(18 43 48 / 18%),
@@ -179,12 +183,12 @@
   backdrop-filter: blur(18px);
 }
 
-.controls > div > div:first-child {
+.controls>div>div:first-child {
   gap: 0.2rem;
   padding: 1.4rem 1.4rem 1rem;
 }
 
-.controls .controls-title {
+.controls .title {
   color: hsl(var(--foreground));
   font-family: "ABC Monument Grotesk", Arial, sans-serif;
   font-size: 3rem;
@@ -192,6 +196,7 @@
   letter-spacing: -0.015em;
   line-height: 0.9;
 }
+
 
 .controls .controls-subtitle {
   margin: 0;
@@ -202,7 +207,8 @@
   text-transform: none;
 }
 
-.controls h3 {
+.controls h3,
+.purpose-dialog h3 {
   color: hsl(var(--foreground));
   font-size: 1rem;
   padding: 0.25rem 0rem 0rem;
@@ -240,7 +246,7 @@
   flex: 0 0 auto;
 }
 
-.controls > div > div:nth-child(2) {
+.controls>div>div:nth-child(2) {
   padding: 0 1.4rem 1.4rem;
 }
 
@@ -265,27 +271,31 @@
   list-style: none;
 }
 
+.export-steps li,
+.purpose-dialog p {
+  color: #171717;
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
 .export-steps li {
   position: relative;
   min-height: 1.5rem;
   padding-left: 1.85rem;
-  color: #171717;
-  font-size: 1rem;
-  line-height: 1.15;
   padding: 0rem 0rem 0.25rem 1.85rem;
   counter-increment: export-step;
 }
 
-  .export-steps li::before {
-    position: absolute;
-    top: 0.02rem;
-    left: 0;
-    color: #171717;
-    content: "[" counter(export-step) "]";
-    font-size: 1rem;
-    font-weight: 700;
-    line-height: 1.15;
-  }
+.export-steps li::before {
+  position: absolute;
+  top: 0.02rem;
+  left: 0;
+  color: #171717;
+  content: "[" counter(export-step) "]";
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
 
 .controls hr {
   height: 1px;
@@ -446,6 +456,113 @@
   color: hsl(var(--muted-foreground));
 }
 
+.controls .purpose-trigger {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 0.5rem);
+  white-space: nowrap;
+}
+
+.purpose-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(80vw, 64rem);
+  height: min(60vw, 48rem, calc(100dvh - 2rem));
+  aspect-ratio: 4 / 3;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  padding: 1.5rem;
+  border: 2px solid rgba(0, 0, 0, 0.72);
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+}
+
+.purpose-dialog::backdrop {
+  background: rgb(0 0 0 / 68%);
+}
+
+.purpose-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.purpose-header h2 {
+  color: hsl(var(--foreground));
+  font-family: "ABC Monument Grotesk", Arial, sans-serif;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 0.9;
+}
+
+
+.purpose-close {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 2px solid #111;
+  background: transparent;
+  color: #020202;
+  cursor: pointer;
+}
+
+.purpose-close:hover {
+  background: #000;
+  color: #fff;
+}
+
+.purpose-close svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.image-placeholder {
+  display: grid;
+  min-height: 8rem;
+  place-items: center;
+  text-align: center;
+}
+
+.purpose-goal p {
+  margin: 0 0 1rem;
+}
+
+.purpose-goal h3 {
+  color: hsl(var(--foreground));
+  font-family: "ABC Monument Grotesk", Arial, sans-serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+
+.purpose-main-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-bottom: 1rem;
+}
+
+.purpose-images {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.purpose-images .image-placeholder {
+  min-width: 0;
+  min-height: 10rem;
+  flex: 1 1 0;
+}
+
 @media (min-width: 768px) and (max-width: 1024px) {
   .controls {
     top: 0.75rem;
@@ -455,15 +572,20 @@
     max-height: calc(100dvh - 1.5rem);
   }
 
-  .controls .controls-title {
+  .controls .purpose-trigger {
+    top: 0;
+  }
+
+  .controls .title,
+  .purpose-dialog .title {
     font-size: 2.4rem;
   }
 
-  .controls > div > div:first-child {
+  .controls>div>div:first-child {
     padding: 1.15rem 1.15rem 0.85rem;
   }
 
-  .controls > div > div:nth-child(2) {
+  .controls>div>div:nth-child(2) {
     padding: 0 1.15rem 1.15rem;
   }
 }
@@ -477,20 +599,27 @@
     width: 100%;
     height: var(--drawer-height, 6rem);
     max-height: none;
-    overflow: hidden;
-    padding: 0;
-    border: 0;
+    overflow: visible;
+    padding: 0.5rem;
+    background: hsl(var(--card));
     border-top: 2px solid rgba(0, 0, 0, 0.72);
-    border-radius: 0;
+    border-radius: var(--radius) var(--radius) 0 0;
     box-shadow: 0 -0.5rem 1.5rem rgb(18 43 48 / 16%);
     transition: height 220ms ease;
+  }
+
+  .controls .purpose-trigger {
+    top: auto;
+    right: auto;
+    bottom: calc(100% + 0.5rem);
+    left: 1rem;
   }
 
   .controls.is-dragging {
     transition: none;
   }
 
-  .controls > div {
+  .controls>div {
     display: flex;
     height: 100%;
     min-height: 0;
@@ -502,13 +631,13 @@
     backdrop-filter: none;
   }
 
-  .controls > div > div:first-child {
+  .controls>div>div:first-child {
     flex: 0 0 auto;
     gap: 0.1rem;
     padding: 0.3rem 0.85rem 0.55rem;
   }
 
-  .controls > div > div:nth-child(2) {
+  .controls>div>div:nth-child(2) {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -516,7 +645,7 @@
     padding: 0 0.85rem calc(0.75rem + env(safe-area-inset-bottom));
   }
 
-  .controls:not(.is-mobile-open) > div > div:nth-child(2) {
+  .controls:not(.is-mobile-open)>div>div:nth-child(2) {
     display: none;
   }
 
@@ -552,7 +681,8 @@
     height: 1rem;
   }
 
-  .controls .controls-title {
+  .controls .title,
+  .purpose-dialog .title {
     font-size: clamp(1.6rem, 7vw, 2rem);
     line-height: 1;
   }
@@ -562,7 +692,8 @@
     line-height: 1.1;
   }
 
-  .controls h3 {
+  .controls h3,
+  .purpose-dialog h3 {
     font-size: 0.9rem;
   }
 
@@ -580,18 +711,32 @@
     font-size: 0.9rem;
   }
 
+  .purpose-dialog p {
+    font-size: 0.9rem;
+  }
+
   .controls .status {
     padding: 0.6rem 0.7rem;
   }
+
+  .purpose-dialog {
+    width: calc(100vw - 2rem);
+    height: 75vh;
+  }
+
+  .purpose-images {
+    grid-template-columns: 1fr;
+  }
+
 }
 
 @media (max-width: 380px) {
-  .controls > div > div:first-child {
+  .controls>div>div:first-child {
     padding-right: 0.7rem;
     padding-left: 0.7rem;
   }
 
-  .controls > div > div:nth-child(2) {
+  .controls>div>div:nth-child(2) {
     padding-right: 0.7rem;
     padding-left: 0.7rem;
   }
