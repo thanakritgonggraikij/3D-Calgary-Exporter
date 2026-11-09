@@ -173,6 +173,37 @@ export default function App() {
     })
   }
 
+  function toggleAllExportSelections() {
+    const selectAll = !Object.values(exportSelection).every(Boolean)
+    setExportSelection(Object.fromEntries(layerControls.map(({ name }) => [name, selectAll])) as Record<MapOverlayName, boolean>)
+  }
+
+  async function toggleAllOverlays() {
+    if (!map) return
+    const showAll = !Object.values(visibleOverlays).every(Boolean)
+    if (!showAll) {
+      layerControls.forEach(({ name }) => setMapOverlayVisibility(map, name, false))
+      setVisibleOverlays(initialOverlayVisibility)
+      return
+    }
+
+    await runAction("all-overlays", async (currentMap, currentSelection, signal) => {
+      const selectionKey = `${currentSelection.longitude},${currentSelection.latitude}`
+      for (const { name, load } of layerControls) {
+        signal.throwIfAborted()
+        if (!visibleOverlays[name]) {
+          if (loadedOverlaySelectionsRef.current[name] !== selectionKey) {
+            await load(currentMap, currentSelection, signal)
+            loadedOverlaySelectionsRef.current[name] = selectionKey
+          }
+          setMapOverlayVisibility(currentMap, name, true)
+          setVisibleOverlays((current) => ({ ...current, [name]: true }))
+        }
+      }
+      return layerControls.length
+    }, () => `Rendered all ${layerControls.length} map layers`)
+  }
+
   function cancelExport() {
     activeActionControllerRef.current?.abort()
   }
@@ -323,8 +354,28 @@ export default function App() {
             <div className="layer-controls" role="group" aria-label="Export selection and map visibility">
               <div className="layer-control-header">
                 <h3 title="Element List" style={{ width: "100%", textAlign: "left" }}>Map Elements</h3>
-                <span title="Queue for export" role="img" aria-label="Queue for export"><ListChecks /></span>
-                <span title="Toggle Render on Map" role="img" aria-label="Toggle Render on Map"><Eye /></span>
+                <button
+                  type="button"
+                  className="layer-header-toggle"
+                  aria-label={Object.values(exportSelection).every(Boolean) ? "Remove all elements from export" : "Queue all elements for export"}
+                  aria-pressed={Object.values(exportSelection).every(Boolean)}
+                  title={Object.values(exportSelection).every(Boolean) ? "Remove all elements from export" : "Queue all elements for export"}
+                  disabled={busy !== null}
+                  onClick={toggleAllExportSelections}
+                >
+                  <ListChecks aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="layer-header-toggle"
+                  aria-label={Object.values(visibleOverlays).every(Boolean) ? "Hide all elements from map" : "Render all elements on map"}
+                  aria-pressed={Object.values(visibleOverlays).every(Boolean)}
+                  title={Object.values(visibleOverlays).every(Boolean) ? "Hide all elements from map" : "Render all elements on map"}
+                  disabled={!map || busy !== null}
+                  onClick={() => void toggleAllOverlays()}
+                >
+                  {busy === "all-overlays" ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Eye aria-hidden="true" />}
+                </button>
               </div>
               {layerControls.map(({ name, label, Icon, load, successMessage }) => (
                 <div className="layer-control-row" key={name}>
