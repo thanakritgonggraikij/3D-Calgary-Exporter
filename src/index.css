@@ -353,9 +353,26 @@
   padding: 0 0.15rem 0.25rem;
 }
 
-.layer-control-header span {
+.layer-control-header span,
+.layer-control-header button {
   display: grid;
   place-items: center;
+}
+
+.controls button.layer-header-toggle {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  min-height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+}
+
+.controls button.layer-header-toggle svg {
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
 .layer-control-header svg {
