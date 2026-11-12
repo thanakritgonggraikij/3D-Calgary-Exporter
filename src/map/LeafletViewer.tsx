@@ -39,7 +39,7 @@ export default function LeafletViewer({ onReady, selection, onSelectionChange, s
         scrollWheelZoom: false,
         smoothWheelZoom: true,
         smoothSensitivity: 1,
-        minZoom: 2,
+        minZoom: 10,
         maxBounds: calgaryBounds,
         maxBoundsViscosity: 1.0,
         zoomSnap: 0,
