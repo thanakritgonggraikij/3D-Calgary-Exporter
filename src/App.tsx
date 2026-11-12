@@ -3,12 +3,16 @@ import { ChevronDown, ChevronUp, Download, Eye, EyeOff, GripHorizontal, House, L
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import LeafletViewer from "@/map/LeafletViewer"
-import { exportBuildingsObj, loadBuildingsInArea, loadDEMExtent, loadParcelsInArea, loadRoadsInArea, loadTreesInArea, setMapOverlayVisibility } from "@/map/data"
-import type { MapOverlayName, MapSelection } from "@/map/data"
+import { exportBuildingsObj, loadBuildingsInArea, loadDEMExtent, loadParcelsInArea, loadRoadsInArea, loadTreesInArea, setMapOverlayVisibility, setParcelClickHandler } from "@/map/data"
+import type { MapOverlayName, MapSelection, ParcelFeature } from "@/map/data"
 import type { Map as LeafletMap } from "leaflet"
 
 type PlaceSearchResult = { lat: string; lon: string }
 type DrawerStyle = CSSProperties & { "--drawer-height": string }
+
+function formatParcelValue(value: unknown) {
+  return value === null || value === undefined || value === "" ? "Not available" : String(value)
+}
 
 const initialOverlayVisibility: Record<MapOverlayName, boolean> = {
   buildings: false,
@@ -49,6 +53,7 @@ export default function App() {
   const [exportSelection, setExportSelection] = useState(initialExportSelection)
   const [status, setStatus] = useState<{ message: string; type: "success" | "error" | "loading" | "cancelled" } | null>(null)
   const [selection, setSelection] = useState<MapSelection>({ longitude: -114.0525, latitude: 51.0525 })
+  const [selectedParcel, setSelectedParcel] = useState<ParcelFeature | null>(null)
   const [searchedLocation, setSearchedLocation] = useState<MapSelection | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [searching, setSearching] = useState(false)
@@ -72,6 +77,11 @@ export default function App() {
     if (moreInfoOpen && !dialog.open) dialog.showModal()
     if (!moreInfoOpen && dialog.open) dialog.close()
   }, [moreInfoOpen])
+
+  useEffect(() => {
+    if (!map) return
+    return setParcelClickHandler(map, setSelectedParcel)
+  }, [map])
 
   async function searchPlace(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -272,6 +282,52 @@ export default function App() {
         onSelectionChange={setSelection}
         searchedLocation={searchedLocation}
       />
+      {selectedParcel && (
+        <div className="parcel-data-windows">
+          <section className="parcel-details-window parcel-data-window" aria-label="Selected property details">
+            <header className="parcel-json-header">
+              <h2>Property Details</h2>
+              <button
+                type="button"
+                className="parcel-json-close"
+                aria-label="Close property details"
+                onClick={() => setSelectedParcel(null)}
+              >
+                <X aria-hidden="true" />
+              </button>
+            </header>
+            <dl className="parcel-details-list">
+              <div>
+                <dt>Address</dt>
+                <dd>{formatParcelValue(selectedParcel.properties?.ADDRESS)}</dd>
+              </div>
+              <div>
+                <dt>Assessment Class Description</dt>
+                <dd>{formatParcelValue(selectedParcel.properties?.ASSESSMENT_CLASS_DESCRIPTION)}</dd>
+              </div>
+              <div>
+                <dt>Community</dt>
+                <dd>{formatParcelValue(selectedParcel.properties?.COMM_NAME)}</dd>
+              </div>
+              <div>
+                <dt>Land Use Designation</dt>
+                <dd>{formatParcelValue(selectedParcel.properties?.LAND_USE_DESIGNATION)}</dd>
+              </div>
+              <div>
+                <dt>Year of Construction</dt>
+                <dd>{formatParcelValue(selectedParcel.properties?.YEAR_OF_CONSTRUCTION)}</dd>
+              </div>
+            </dl>
+          </section>
+          <details className="parcel-json-window parcel-data-window">
+            <summary className="parcel-json-header">
+              <span>Selected Parcel JSON</span>
+              <ChevronDown aria-hidden="true" />
+            </summary>
+            <pre aria-label="Parcel GeoJSON">{JSON.stringify(selectedParcel, null, 2)}</pre>
+          </details>
+        </div>
+      )}
 
       <aside ref={controlsRef} className={`controls${drawerExpanded ? " is-mobile-open" : ""}${drawerDragRef.current ? " is-dragging" : ""}`} style={drawerStyle}>
         <Button

@@ -180,9 +180,9 @@
   border: 2px solid rgb(255 255 255 / 72%);
   /* border-radius: 1rem; */
   background: rgb(255 255 255 / 100%);
-  box-shadow:
+  /* box-shadow:
     0 1.5rem 4rem rgb(18 43 48 / 18%),
-    0 0.25rem 0.75rem rgb(18 43 48 / 8%);
+    0 0.25rem 0.75rem rgb(18 43 48 / 8%); */
   backdrop-filter: blur(18px);
 }
 
@@ -450,6 +450,135 @@
   font-size: 0.875rem;
 }
 
+.parcel-data-windows {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 5;
+  display: flex;
+  width: min(22rem, calc(100vw - 2.5rem));
+  max-height: calc(100dvh - 2rem);
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+  box-shadow:
+    0 1.5rem 4rem rgb(18 43 48 / 18%),
+    0 0.25rem 0.75rem rgb(18 43 48 / 8%);
+
+
+}
+
+.parcel-data-window {
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+}
+
+.parcel-details-window {
+  max-height: min(45dvh, 32rem);
+}
+
+.parcel-json-window summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.parcel-json-window summary::-webkit-details-marker {
+  display: none;
+}
+
+.parcel-json-window summary svg {
+  width: 1rem;
+  height: 1rem;
+  transition: transform 160ms ease;
+}
+
+.parcel-json-window[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.parcel-json-window pre {
+  max-height: min(45dvh, 32rem);
+  overflow: auto;
+  margin: 0;
+  padding: 0.75rem;
+  color: #171717;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: pre;
+}
+
+.parcel-json-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.parcel-json-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.parcel-json-close {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border-color);
+  background: #fff;
+  color: #020202;
+  cursor: pointer;
+}
+
+.parcel-json-close:hover {
+  background: var(--border-color);
+  color: #fff;
+}
+
+.parcel-json-close svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.parcel-details-list {
+  display: grid;
+  gap: 0.75rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.75rem;
+  max-height: min(38dvh, 26rem);
+}
+
+.parcel-details-list div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.parcel-details-list dt {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.parcel-details-list dd {
+  margin: 0;
+  color: #171717;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
 .status {
   border: 1px solid var(--border-color);
   /* border-radius: 0.7rem; */
@@ -496,10 +625,13 @@
   max-height: calc(100dvh - 2rem);
   overflow: auto;
   padding: 1.5rem;
-  border: 2px solid rgba(0, 0, 0, 0.72);
+  border: 2px solid var(--border-color);
   border-radius: var(--radius);
   background: hsl(var(--card));
   color: hsl(var(--card-foreground));
+  box-shadow:
+    0 1.5rem 4rem rgb(18 43 48 / 18%),
+    0 0.25rem 0.75rem rgb(18 43 48 / 8%);
 }
 
 .purpose-dialog::backdrop {
@@ -594,6 +726,13 @@
     max-height: calc(100dvh - 1.5rem);
   }
 
+  .parcel-data-windows {
+    top: 0.75rem;
+    left: 0.75rem;
+    width: min(20rem, calc(100vw - 1.5rem));
+    max-height: calc(100dvh - 1.5rem);
+  }
+
   .controls .purpose-trigger {
     top: 0;
   }
@@ -613,6 +752,13 @@
 }
 
 @media (max-width: 767px) {
+  .parcel-data-windows {
+    top: 0.5rem;
+    left: 0;
+    width: 100%;
+    max-height: min(calc(100dvh - 7rem), 50dvh);
+  }
+
   .controls {
     top: auto;
     right: 0;
