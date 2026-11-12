@@ -24,10 +24,17 @@ export default function LeafletViewer({ onReady, selection, onSelectionChange, s
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<LeafletMapType | null>(null)
   const selectionLayerRef = useRef<Rectangle | null>(null)
+  const selectionLockMarkerRef = useRef<L.Marker | null>(null)
+  const selectionLockedRef = useRef(false)
+  const selectionRef = useRef(selection)
+  const onSelectionChangeRef = useRef(onSelectionChange)
+  const dragCleanupRef = useRef<(() => void) | null>(null)
   const searchMarkerRef = useRef<CircleMarker | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const jawgAccessToken = "g0AxIlVuwiLdCnTtl4xavfenRJWvV4Z9Mq29FsLOMlYZYjKa1Uwtxfu4TfzskiKN"
 
+  selectionRef.current = selection
+  onSelectionChangeRef.current = onSelectionChange
 
   useEffect(() => {
     const container = containerRef.current
@@ -44,7 +51,7 @@ export default function LeafletViewer({ onReady, selection, onSelectionChange, s
         maxBoundsViscosity: 1.0,
         zoomSnap: 0,
         zoomDelta: 0.5,
-      }).setView([51.0525, -114.0525], 13)
+      }).setView([51.0525, -114.0525], 14)
 
       // CUSTOM BASEMAP 
       L.tileLayer('https://tile.jawg.io/jawg-terrain/{z}/{x}/{y}{r}.png?access-token=' + jawgAccessToken, {
@@ -61,9 +68,6 @@ export default function LeafletViewer({ onReady, selection, onSelectionChange, s
       //   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       // }).addTo(map)
 
-      map.on("click", ({ latlng }) => {
-        onSelectionChange({ longitude: latlng.lng, latitude: latlng.lat })
-      })
       mapRef.current = map
       onReady(map)
     } catch (error) {
@@ -73,12 +77,15 @@ export default function LeafletViewer({ onReady, selection, onSelectionChange, s
     }
 
     return () => {
+      dragCleanupRef.current?.()
       mapRef.current = null
       selectionLayerRef.current = null
+      selectionLockMarkerRef.current = null
+      selectionLockedRef.current = false
       onReady(null)
       map.remove()
     }
-  }, [onReady, onSelectionChange])
+  }, [onReady])
 
   useEffect(() => {
     const map = mapRef.current
@@ -88,12 +95,84 @@ export default function LeafletViewer({ onReady, selection, onSelectionChange, s
     const selectionLayer = selectionLayerRef.current
     if (selectionLayer) {
       selectionLayer.setBounds(corners)
+      selectionLockMarkerRef.current?.setLatLng([bounds.north, bounds.west])
     } else {
-      selectionLayerRef.current = L.rectangle(corners, {
-        color: "#e5a900",
-        weight: 2,
+      const activeMap = map
+      const layer = L.rectangle(corners, {
+        color: "#000000",
+        weight: 4,
         fillColor: "#e5a900",
-        fillOpacity: 0.18,
+        fillOpacity: 0.12,
+        dashArray: "4 8",
+        className: "selection-window",
+        bubblingMouseEvents: false,
+      }).addTo(map)
+      layer.on("mouseover", () => layer.setStyle({ weight: 6 }))
+      layer.on("mouseout", () => layer.setStyle({ weight: 4 }))
+      layer.on("mousedown", (event) => {
+        L.DomEvent.stopPropagation(event.originalEvent)
+        if (selectionLockedRef.current || dragCleanupRef.current) return
+
+        const startPoint = event.latlng
+        const startSelection = selectionRef.current
+        const mapWasDragging = activeMap.dragging.enabled()
+        const container = activeMap.getContainer()
+        const ownerDocument = container.ownerDocument
+        activeMap.dragging.disable()
+        container.classList.add("selection-dragging")
+
+        const moveSelection = (moveEvent: MouseEvent) => {
+          const currentPoint = activeMap.mouseEventToLatLng(moveEvent)
+          onSelectionChangeRef.current({
+            longitude: startSelection.longitude + currentPoint.lng - startPoint.lng,
+            latitude: startSelection.latitude + currentPoint.lat - startPoint.lat,
+          })
+        }
+        function stopDragging() {
+          ownerDocument.removeEventListener("mousemove", moveSelection)
+          ownerDocument.removeEventListener("mouseup", stopDragging)
+          if (mapWasDragging) activeMap.dragging.enable()
+          container.classList.remove("selection-dragging")
+          dragCleanupRef.current = null
+        }
+
+        ownerDocument.addEventListener("mousemove", moveSelection)
+        ownerDocument.addEventListener("mouseup", stopDragging)
+        dragCleanupRef.current = stopDragging
+      })
+      selectionLayerRef.current = layer
+
+      const lockButton = document.createElement("button")
+      lockButton.type = "button"
+      lockButton.className = "selection-lock-button"
+      lockButton.setAttribute("aria-label", "Lock selection window")
+      lockButton.setAttribute("aria-pressed", "false")
+      lockButton.title = "Lock selection window"
+      lockButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>'
+      L.DomEvent.disableClickPropagation(lockButton)
+      L.DomEvent.disableScrollPropagation(lockButton)
+      lockButton.addEventListener("click", () => {
+        const locked = !selectionLockedRef.current
+        selectionLockedRef.current = locked
+        lockButton.setAttribute("aria-label", `${locked ? "Unlock" : "Lock"} selection window`)
+        lockButton.setAttribute("aria-pressed", String(locked))
+        lockButton.title = `${locked ? "Unlock" : "Lock"} selection window`
+        lockButton.innerHTML = locked
+          ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>'
+          : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 7.5-2"></path></svg>'
+        layer.getElement()?.classList.toggle("selection-window-locked", locked)
+      })
+
+      selectionLockMarkerRef.current = L.marker([bounds.north, bounds.west], {
+        icon: L.divIcon({
+          className: "selection-lock-marker",
+          html: lockButton,
+          iconSize: [32, 32],
+          iconAnchor: [0, 0],
+        }),
+        bubblingMouseEvents: false,
+        keyboard: false,
+        zIndexOffset: 1000,
       }).addTo(map)
     }
   }, [selection])
