@@ -98,6 +98,59 @@
   z-index: 0;
 }
 
+.selection-window {
+  cursor: move;
+  pointer-events: stroke !important;
+}
+
+.selection-window.selection-window-locked {
+  cursor: not-allowed;
+}
+
+.leaflet-container.selection-dragging .selection-window {
+  cursor: grabbing;
+}
+
+.selection-lock-marker {
+  border: 0;
+  background: transparent;
+  padding: 0.25rem;
+}
+
+.selection-lock-button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 2px solid #000;
+  border-radius: 6px;
+  padding: 0;
+  background: #fff;
+  color: #111;
+  box-shadow: 0 1px 5px rgb(0 0 0 / 40%);
+  cursor: pointer;
+}
+
+.selection-lock-button[aria-pressed="true"] {
+  background: #171717;
+  color: #fff;
+}
+
+.selection-lock-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.selection-lock-button:focus-visible {
+  outline: 2px solid #1f6b8f;
+  outline-offset: 2px;
+}
+
 .app-shell {
   position: relative;
   overflow: hidden;
@@ -605,6 +658,26 @@
 .status.cancelled {
   background: hsl(var(--muted));
   color: hsl(var(--muted-foreground));
+}
+
+.action-log-label {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.action-log {
+  box-sizing: border-box;
+  height: 100px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  padding: 0.5rem 0.625rem;
+  background: #f7f8f8;
+  color: #333;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .controls .purpose-trigger {
