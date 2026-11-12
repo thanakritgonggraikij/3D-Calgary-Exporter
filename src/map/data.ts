@@ -1,6 +1,6 @@
 import * as L from "leaflet"
 import type { Map as LeafletMap } from "leaflet"
-import type { FeatureCollection, MultiPolygon, Polygon } from "geojson"
+import type { FeatureCollection, GeoJsonProperties, MultiPolygon, Polygon } from "geojson"
 
 const treesApi = "https://data.calgary.ca/resource/tfs4-3wwa.json"
 const parcelsApi = "https://services1.arcgis.com/AVP60cs0Q9PEA8rH/ArcGIS/rest/services/Parcel_with_Roll_2026/FeatureServer/0/query"
@@ -73,11 +73,22 @@ type RoadFeature = {
 }
 type ParcelGeometry = Polygon | MultiPolygon
 type ParcelFeatureCollection = FeatureCollection<ParcelGeometry>
+export type ParcelFeature = ParcelFeatureCollection["features"][number]
+type ParcelClickHandler = (feature: ParcelFeature) => void
 
 let chunksIndexPromise: Promise<ChunksIndex> | undefined
 let demChunksIndexPromise: Promise<DEMChunksIndex> | undefined
 const chunkCache = new Map<string, BuildingFeature[]>()
 const roadFileTextCache = new Map<string, Promise<string>>()
+const parcelClickHandlers = new WeakMap<LeafletMap, ParcelClickHandler>()
+const selectedParcelLayers = new WeakMap<LeafletMap, L.Path>()
+
+export function setParcelClickHandler(map: LeafletMap, handler: ParcelClickHandler) {
+  parcelClickHandlers.set(map, handler)
+  return () => {
+    parcelClickHandlers.delete(map)
+  }
+}
 const roadSelectionCache = new Map<string, Promise<Road[]>>()
 type MapOverlays = { trees: L.LayerGroup; buildings: L.LayerGroup; demExtents: L.LayerGroup; roads: L.LayerGroup; parcels: L.LayerGroup }
 const mapOverlays = new WeakMap<LeafletMap, MapOverlays>()
@@ -494,7 +505,7 @@ async function fetchParcelsInArea(selection: MapSelection, signal?: AbortSignal)
     geometryType: "esriGeometryEnvelope",
     inSR: "4326",
     spatialRel: "esriSpatialRelIntersects",
-    outFields: "OBJECTID",
+    outFields: "*",
     returnGeometry: "true",
     outSR: "4326",
     resultRecordCount: "2000",
@@ -539,16 +550,38 @@ export async function loadParcelsInArea(map: LeafletMap, selection: MapSelection
   const features = await fetchParcelsInArea(selection, signal)
   const collection: ParcelFeatureCollection = { type: "FeatureCollection", features }
   const renderer = L.canvas()
-  const parcels = L.geoJSON(collection, {
+  const parcelStyle: L.PathOptions = {
+    color: "#304462",
+    weight: 0.5,
+    opacity: 1,
+    fill: false,
+    fillOpacity: 0.01,
+  }
+  const parcels = L.geoJSON<GeoJsonProperties, ParcelGeometry>(collection, {
     style: {
-      color: "#304462",
-      weight: 1,
-      opacity: 0.5,
-      fill: false,
+      ...parcelStyle,
       renderer,
+    },
+    onEachFeature: (feature, layer) => {
+      if (!(layer instanceof L.Path)) return
+      layer.on("click", (event) => {
+        selectedParcelLayers.get(map)?.setStyle(parcelStyle)
+        layer.setStyle({
+          color: "#d81b60",
+          weight: 3,
+          opacity: 1,
+          fill: true,
+          fillColor: "#ff4081",
+          fillOpacity: 0.35,
+        })
+        selectedParcelLayers.set(map, layer)
+        map.flyTo(event.latlng, 16)
+        parcelClickHandlers.get(map)?.(feature)
+      })
     },
   })
   const layer = getMapOverlays(map).parcels
+  selectedParcelLayers.delete(map)
   layer.clearLayers()
   layer.addLayer(parcels)
   return features.length

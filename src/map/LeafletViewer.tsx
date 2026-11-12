@@ -39,12 +39,12 @@ export default function LeafletViewer({ onReady, selection, onSelectionChange, s
         scrollWheelZoom: false,
         smoothWheelZoom: true,
         smoothSensitivity: 1,
-        minZoom: 10,
+        minZoom: 2,
         maxBounds: calgaryBounds,
         maxBoundsViscosity: 1.0,
         zoomSnap: 0,
         zoomDelta: 0.5,
-      }).setView([51.0525, -114.0525], 13)
+      }).setView([51.0525, -114.0525], 14)
 
       // CUSTOM BASEMAP 
       L.tileLayer('https://tile.jawg.io/jawg-terrain/{z}/{x}/{y}{r}.png?access-token=' + jawgAccessToken, {
@@ -94,6 +94,7 @@ export default function LeafletViewer({ onReady, selection, onSelectionChange, s
         weight: 2,
         fillColor: "#e5a900",
         fillOpacity: 0.18,
+        interactive: false,
       }).addTo(map)
     }
   }, [selection])
