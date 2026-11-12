@@ -39,11 +39,11 @@ type LayerControl = {
 }
 
 const layerControls: LayerControl[] = [
-  { name: "buildings", label: "Buildings", Icon: House, load: loadBuildingsInArea, successMessage: (count) => `Loaded ${count} detailed buildings` },
+  { name: "buildings", label: "3D Buildings", Icon: House, load: loadBuildingsInArea, successMessage: (count) => `Loaded ${count} detailed buildings` },
   { name: "terrain", label: "Terrain", Icon: Mountain, load: loadDEMExtent, successMessage: (count) => `Loaded ${count} DEM chunk extents` },
   { name: "roads", label: "Roads", Icon: Route, load: loadRoadsInArea, successMessage: (count) => `Loaded ${count} road polylines` },
   { name: "parcels", label: "Parcels", Icon: RectangleHorizontal, load: loadParcelsInArea, successMessage: (count) => `Loaded ${count} parcel boundaries` },
-  { name: "trees", label: "Trees", Icon: Trees, load: loadTreesInArea, successMessage: (count) => `Loaded ${count} trees` },
+  { name: "trees", label: "Public Trees", Icon: Trees, load: loadTreesInArea, successMessage: (count) => `Loaded ${count} trees` },
 ]
 
 export default function App() {
