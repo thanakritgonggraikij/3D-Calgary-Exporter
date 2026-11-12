@@ -32,7 +32,7 @@ const initialOverlayVisibility: Record<MapOverlayName, boolean> = {
 const initialExportSelection: Record<MapOverlayName, boolean> = {
   buildings: true,
   trees: true,
-  terrain: true,
+  terrain: false,
   demTerrain: true,
   roads: true,
   parcels: true,
@@ -494,7 +494,7 @@ export default function App() {
             </div>
             <hr></hr>
 
-            <h3>Export</h3>
+            <h3>Export Selected Area</h3>
 
             <Button variant="secondary" className="export-button w-full justify-start" disabled={!map || busy !== null || !Object.values(exportSelection).some(Boolean)} onClick={() => void runAction("obj", (currentMap, currentSelection, signal) => exportBuildingsObj(currentMap, currentSelection, signal, exportSelection), ({ buildingCount, treeCount, roadCount, parcelCount, terrainChunkCount, demTerrainVertexCount }) => `Exported OBJ with ${buildingCount} buildings, ${treeCount} trees, ${roadCount} road polylines, ${parcelCount} parcel boundaries, ${terrainChunkCount} terrain chunks, and ${demTerrainVertexCount.toLocaleString()} DEM Terrain vertices`)}>
               {busy === "obj" ? <LoaderCircle className="animate-spin" /> : <Download />}
