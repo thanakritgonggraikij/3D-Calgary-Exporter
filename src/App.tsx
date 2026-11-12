@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from "react"
-import { ChevronDown, ChevronUp, Download, Eye, EyeOff, GripHorizontal, House, Layers3, ListChecks, LoaderCircle, Mountain, RectangleHorizontal, Route, Search, Trees, X, type LucideIcon } from "lucide-react"
+import { ChevronDown, ChevronUp, Download, Eye, EyeOff, GripHorizontal, House, ListChecks, LoaderCircle, Mountain, RectangleHorizontal, Route, Search, Trees, X, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import LeafletViewer from "@/map/LeafletViewer"
-import { exportBuildingsObj, loadBuildingsInArea, loadDEMExtent, loadParcelsInArea, loadRoadsInArea, loadTreesInArea, setMapOverlayVisibility, setParcelClickHandler } from "@/map/data"
+import { exportBuildingsObj, loadBuildingsInArea, loadDEMExtent, loadParcelsInArea, loadRoadsInArea, loadTreesInArea, loadDemTerrainExtent, setMapOverlayVisibility, setParcelClickHandler } from "@/map/data"
 import type { MapOverlayName, MapSelection, ParcelFeature } from "@/map/data"
 import type { Map as LeafletMap } from "leaflet"
 
@@ -14,10 +14,17 @@ function formatParcelValue(value: unknown) {
   return value === null || value === undefined || value === "" ? "Not available" : String(value)
 }
 
+function getActionLabel(name: string) {
+  if (name === "obj") return "OBJ export"
+  if (name === "all-overlays") return "All map elements"
+  return layerControls.find((control) => control.name === name)?.label ?? name
+}
+
 const initialOverlayVisibility: Record<MapOverlayName, boolean> = {
   buildings: false,
   trees: false,
   terrain: false,
+  demTerrain: false,
   roads: false,
   parcels: false,
 }
@@ -25,7 +32,8 @@ const initialOverlayVisibility: Record<MapOverlayName, boolean> = {
 const initialExportSelection: Record<MapOverlayName, boolean> = {
   buildings: true,
   trees: true,
-  terrain: true,
+  terrain: false,
+  demTerrain: true,
   roads: true,
   parcels: true,
 }
@@ -41,10 +49,13 @@ type LayerControl = {
 const layerControls: LayerControl[] = [
   { name: "buildings", label: "3D Buildings", Icon: House, load: loadBuildingsInArea, successMessage: (count) => `Loaded ${count} detailed buildings` },
   { name: "terrain", label: "Terrain", Icon: Mountain, load: loadDEMExtent, successMessage: (count) => `Loaded ${count} DEM chunk extents` },
+  { name: "demTerrain", label: "DEM Terrain", Icon: Mountain, load: loadDemTerrainExtent, successMessage: (count) => `Loaded DEM window (${count.toLocaleString()} pixels)` },
   { name: "roads", label: "Roads", Icon: Route, load: loadRoadsInArea, successMessage: (count) => `Loaded ${count} road polylines` },
   { name: "parcels", label: "Parcels", Icon: RectangleHorizontal, load: loadParcelsInArea, successMessage: (count) => `Loaded ${count} parcel boundaries` },
   { name: "trees", label: "Public Trees", Icon: Trees, load: loadTreesInArea, successMessage: (count) => `Loaded ${count} trees` },
 ]
+
+const visibleLayerControls = layerControls.filter(({ name }) => name !== "terrain")
 
 export default function App() {
   const [map, setMap] = useState<LeafletMap | null>(null)
@@ -52,6 +63,7 @@ export default function App() {
   const [visibleOverlays, setVisibleOverlays] = useState(initialOverlayVisibility)
   const [exportSelection, setExportSelection] = useState(initialExportSelection)
   const [status, setStatus] = useState<{ message: string; type: "success" | "error" | "loading" | "cancelled" } | null>(null)
+  const [actionLog, setActionLog] = useState<string[]>([])
   const [selection, setSelection] = useState<MapSelection>({ longitude: -114.0525, latitude: 51.0525 })
   const [selectedParcel, setSelectedParcel] = useState<ParcelFeature | null>(null)
   const [searchedLocation, setSearchedLocation] = useState<MapSelection | null>(null)
@@ -141,6 +153,8 @@ export default function App() {
     }
     const controller = new AbortController()
     activeActionControllerRef.current = controller
+    const startedAt = performance.now()
+    let outcome = "completed"
     setBusy(name)
     setStatus({ message: "Working (May take up to 30 Seconds)", type: "loading" })
     try {
@@ -148,10 +162,17 @@ export default function App() {
       onSuccess?.(count)
       setStatus({ message: successMessage(count), type: "success" })
     } catch (error) {
+      outcome = controller.signal.aborted ? "cancelled" : "failed"
       setStatus(controller.signal.aborted
         ? { message: "Export cancelled.", type: "cancelled" }
         : { message: error instanceof Error ? error.message : "Something went wrong.", type: "error" })
     } finally {
+      const elapsedSeconds = ((performance.now() - startedAt) / 1000).toFixed(2)
+      const timestamp = new Date().toLocaleTimeString()
+      setActionLog((entries) => [
+        ...entries.slice(-99),
+        `${timestamp} | ${getActionLabel(name)} ${outcome} in ${elapsedSeconds} s`,
+      ])
       if (activeActionControllerRef.current === controller) activeActionControllerRef.current = null
       setBusy(null)
     }
@@ -190,16 +211,22 @@ export default function App() {
 
   async function toggleAllOverlays() {
     if (!map) return
-    const showAll = !Object.values(visibleOverlays).every(Boolean)
+    const showAll = !visibleLayerControls.every(({ name }) => visibleOverlays[name])
     if (!showAll) {
-      layerControls.forEach(({ name }) => setMapOverlayVisibility(map, name, false))
-      setVisibleOverlays(initialOverlayVisibility)
+      visibleLayerControls.forEach(({ name }) => setMapOverlayVisibility(map, name, false))
+      setVisibleOverlays((current) => {
+        const next = { ...current }
+        visibleLayerControls.forEach(({ name }) => {
+          next[name] = false
+        })
+        return next
+      })
       return
     }
 
     await runAction("all-overlays", async (currentMap, currentSelection, signal) => {
       const selectionKey = `${currentSelection.longitude},${currentSelection.latitude}`
-      for (const { name, load } of layerControls) {
+      for (const { name, load } of visibleLayerControls) {
         signal.throwIfAborted()
         if (!visibleOverlays[name]) {
           if (loadedOverlaySelectionsRef.current[name] !== selectionKey) {
@@ -210,8 +237,8 @@ export default function App() {
           setVisibleOverlays((current) => ({ ...current, [name]: true }))
         }
       }
-      return layerControls.length
-    }, () => `Rendered all ${layerControls.length} map layers`)
+      return visibleLayerControls.length
+    }, () => `Rendered all ${visibleLayerControls.length} map layers`)
   }
 
   function cancelExport() {
@@ -400,7 +427,7 @@ export default function App() {
             </button>
             {howToUseOpen && (
               <ol className="export-steps" id="how-to-use-content">
-                <li>Click the map to choose an export center.</li>
+                <li>Move your area of interest by hovering over the selection box outline, then dragging it to the desired location.</li>
                 <li>Use the list and eye icons to choose what to export and render on the map.</li>
                 <li>Select Export .OBJ to download the file for Blender.</li>
               </ol>
@@ -424,16 +451,16 @@ export default function App() {
                 <button
                   type="button"
                   className="layer-header-toggle"
-                  aria-label={Object.values(visibleOverlays).every(Boolean) ? "Hide all elements from map" : "Render all elements on map"}
-                  aria-pressed={Object.values(visibleOverlays).every(Boolean)}
-                  title={Object.values(visibleOverlays).every(Boolean) ? "Hide all elements from map" : "Render all elements on map"}
+                  aria-label={visibleLayerControls.every(({ name }) => visibleOverlays[name]) ? "Hide all elements from map" : "Render all elements on map"}
+                  aria-pressed={visibleLayerControls.every(({ name }) => visibleOverlays[name])}
+                  title={visibleLayerControls.every(({ name }) => visibleOverlays[name]) ? "Hide all elements from map" : "Render all elements on map"}
                   disabled={!map || busy !== null}
                   onClick={() => void toggleAllOverlays()}
                 >
                   {busy === "all-overlays" ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Eye aria-hidden="true" />}
                 </button>
               </div>
-              {layerControls.map(({ name, label, Icon, load, successMessage }) => (
+              {visibleLayerControls.map(({ name, label, Icon, load, successMessage }) => (
                 <div className="layer-control-row" key={name}>
                   <span className="layer-control-name"><Icon aria-hidden="true" />{label}</span>
                   <Button
@@ -467,9 +494,9 @@ export default function App() {
             </div>
             <hr></hr>
 
-            <h3>Export</h3>
+            <h3>Export Selected Area</h3>
 
-            <Button variant="secondary" className="export-button w-full justify-start" disabled={!map || busy !== null || !Object.values(exportSelection).some(Boolean)} onClick={() => void runAction("obj", (currentMap, currentSelection, signal) => exportBuildingsObj(currentMap, currentSelection, signal, exportSelection), ({ buildingCount, treeCount, roadCount, parcelCount, terrainChunkCount }) => `Exported OBJ with ${buildingCount} buildings, ${treeCount} trees, ${roadCount} road polylines, ${parcelCount} parcel boundaries, and ${terrainChunkCount} terrain chunks`)}>
+            <Button variant="secondary" className="export-button w-full justify-start" disabled={!map || busy !== null || !Object.values(exportSelection).some(Boolean)} onClick={() => void runAction("obj", (currentMap, currentSelection, signal) => exportBuildingsObj(currentMap, currentSelection, signal, exportSelection), ({ buildingCount, treeCount, roadCount, parcelCount, terrainChunkCount, demTerrainVertexCount }) => `Exported OBJ with ${buildingCount} buildings, ${treeCount} trees, ${roadCount} road polylines, ${parcelCount} parcel boundaries, ${terrainChunkCount} terrain chunks, and ${demTerrainVertexCount.toLocaleString()} DEM Terrain vertices`)}>
               {busy === "obj" ? <LoaderCircle className="animate-spin" /> : <Download />}
               .OBJ (BLENDER/SKP)
             </Button>
@@ -485,6 +512,12 @@ export default function App() {
               </Button>
             )}
             {status && <div role="status" className={`status ${status.type}`}>{status.message}</div>}
+            <div className="action-log-label">Action timings</div>
+            <div className="action-log" role="log" aria-label="Action timing log" aria-live="polite">
+              {actionLog.length
+                ? actionLog.map((entry, index) => <div key={`${entry}-${index}`}>{entry}</div>)
+                : <div>Load and export times will appear here.</div>}
+            </div>
 
             <hr></hr>
 
@@ -495,6 +528,8 @@ export default function App() {
               <b>Buildings: </b>City of Calgary Open Data Portal (https://data.calgary.ca/Base-Maps/3D-Buildings-Citywide/cchr-krqg/about_data) <br />
               <br></br>
               <b>Terrain: </b>City of Calgary Open Data Portal (https://data.calgary.ca/Base-Maps/Digital-Elevation-Model-DEM-ASCII-2m/eink-tu9p/about_data) <br />
+              <br></br>
+              <b>DEM Terrain: </b>Citywide DEM Cloud Optimized GeoTIFF (https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_citywide/DEM_Calgary_COG.tif) <br />
               <br></br>
               <b>Roads: </b>OpenStreetMap contributors via the Overpass API (https://overpass-api.de/) <br />
               <br></br>
@@ -566,7 +601,6 @@ export default function App() {
           />
 
         </div>
-
       </dialog>
     </main>
   )

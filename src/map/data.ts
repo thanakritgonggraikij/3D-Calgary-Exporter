@@ -1,12 +1,43 @@
 import * as L from "leaflet"
 import type { Map as LeafletMap } from "leaflet"
 import type { FeatureCollection, GeoJsonProperties, MultiPolygon, Polygon } from "geojson"
+import type { GeoTIFFImage } from "geotiff"
+import proj4 from "proj4"
 
 const treesApi = "https://data.calgary.ca/resource/tfs4-3wwa.json"
 const parcelsApi = "https://services1.arcgis.com/AVP60cs0Q9PEA8rH/ArcGIS/rest/services/Parcel_with_Roll_2026/FeatureServer/0/query"
 const roadsGeoJsonBaseUrl = "https://pub-a06088b43d4e4619a6b98a66771604cf.r2.dev/"
 const chunksBaseUrl = "https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_chunks/"
 const demChunksBaseUrl = "https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_chunks/"
+const citywideDEMCogUrl = "https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_citywide/DEM_Calgary_COG.tif"
+const citywideDEMProjection = "+proj=tmerc +lat_0=0 +lon_0=-114 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs +type=crs"
+const demTerrainPaneName = "demTerrainPane"
+proj4.defs("EPSG:3776", citywideDEMProjection)
+const wgs84ToCitywideDEM = proj4("EPSG:4326", "EPSG:3776")
+const citywideDEMToWgs84 = proj4("EPSG:3776", "EPSG:4326")
+const demTerrainColorStops = [
+  [0, 35, 83, 77],
+  [0.36, 104, 145, 88],
+  [0.72, 211, 183, 120],
+  [1, 231, 111, 0],
+] as const
+const demTerrainColorLookup = (() => {
+  const lookup = new Uint8Array(256 * 3)
+  for (let index = 0; index < 256; index++) {
+    const position = index / 255
+    let upperStopIndex = demTerrainColorStops.findIndex((stop, stopIndex) =>
+      stopIndex > 0 && position <= stop[0])
+    if (upperStopIndex < 0) upperStopIndex = demTerrainColorStops.length - 1
+    const lowerStop = demTerrainColorStops[upperStopIndex - 1]
+    const upperStop = demTerrainColorStops[upperStopIndex]
+    const mix = (position - lowerStop[0]) / (upperStop[0] - lowerStop[0])
+    const colorIndex = index * 3
+    lookup[colorIndex] = Math.round(lowerStop[1] + (upperStop[1] - lowerStop[1]) * mix)
+    lookup[colorIndex + 1] = Math.round(lowerStop[2] + (upperStop[2] - lowerStop[2]) * mix)
+    lookup[colorIndex + 2] = Math.round(lowerStop[3] + (upperStop[3] - lowerStop[3]) * mix)
+  }
+  return lookup
+})()
 const roadGeoJsonFiles = [
   { file: "1_OSMhighway_primary.geojson", highway: "primary" },
   { file: "2_OSMhighway_secondary.geojson", highway: "secondary" },
@@ -38,7 +69,7 @@ type DEMMesh = {
   bounds: ViewBounds
   vertices: DEMVertex[]
   faces: number[][]
-  grid?: { columns: number; rows: number }
+  grid?: { columns: number; rows: number; valid?: Uint8Array }
 }
 type Coordinate = [number, number, number?]
 type BuildingGeometry =
@@ -78,10 +109,14 @@ type ParcelClickHandler = (feature: ParcelFeature) => void
 
 let chunksIndexPromise: Promise<ChunksIndex> | undefined
 let demChunksIndexPromise: Promise<DEMChunksIndex> | undefined
+let citywideDEMImagePromise: Promise<GeoTIFFImage> | undefined
+let citywideDEMRasterWindowKey: string | undefined
+let citywideDEMRasterWindowPromise: Promise<Float32Array> | undefined
 const chunkCache = new Map<string, BuildingFeature[]>()
 const roadFileTextCache = new Map<string, Promise<string>>()
 const parcelClickHandlers = new WeakMap<LeafletMap, ParcelClickHandler>()
 const selectedParcelLayers = new WeakMap<LeafletMap, L.Path>()
+const demTerrainOverlayUrls = new WeakMap<LeafletMap, string>()
 
 export function setParcelClickHandler(map: LeafletMap, handler: ParcelClickHandler) {
   parcelClickHandlers.set(map, handler)
@@ -90,16 +125,20 @@ export function setParcelClickHandler(map: LeafletMap, handler: ParcelClickHandl
   }
 }
 const roadSelectionCache = new Map<string, Promise<Road[]>>()
-type MapOverlays = { trees: L.LayerGroup; buildings: L.LayerGroup; demExtents: L.LayerGroup; roads: L.LayerGroup; parcels: L.LayerGroup }
+type MapOverlays = { trees: L.LayerGroup; buildings: L.LayerGroup; demExtents: L.LayerGroup; demTerrain: L.LayerGroup; roads: L.LayerGroup; parcels: L.LayerGroup }
 const mapOverlays = new WeakMap<LeafletMap, MapOverlays>()
 
 function getMapOverlays(map: LeafletMap): MapOverlays {
   let overlays = mapOverlays.get(map)
   if (!overlays) {
+    const demTerrainPane = map.getPane(demTerrainPaneName) ?? map.createPane(demTerrainPaneName)
+    demTerrainPane.style.zIndex = "350"
+    demTerrainPane.style.pointerEvents = "none"
     overlays = {
       trees: L.layerGroup().addTo(map),
       buildings: L.layerGroup().addTo(map),
       demExtents: L.layerGroup().addTo(map),
+      demTerrain: L.layerGroup().addTo(map),
       roads: L.layerGroup().addTo(map),
       parcels: L.layerGroup().addTo(map),
     }
@@ -270,7 +309,7 @@ function parseCaldem2(file: string, bounds: ViewBounds, data: ArrayBuffer): DEMM
 
   const [anchorLongitude, anchorLatitude] = vertices[0]
   if (anchorLongitude < bounds.west || anchorLongitude > bounds.east ||
-      anchorLatitude < bounds.south || anchorLatitude > bounds.north) {
+    anchorLatitude < bounds.south || anchorLatitude > bounds.north) {
     throw new Error(`DEM chunk ${file} has coordinates outside its indexed bounds.`)
   }
 
@@ -319,6 +358,251 @@ export async function loadDEMExtent(map: LeafletMap, selection: MapSelection) {
   })
 
   return chunks.length
+}
+
+function getCitywideDEMWindow(image: GeoTIFFImage, selection: MapSelection) {
+  const projectedCrs = image.getGeoKeys()?.ProjectedCSTypeGeoKey
+  if (projectedCrs !== 3776) {
+    throw new Error(`The citywide DEM uses an unsupported coordinate system (expected EPSG:3776, received ${projectedCrs ?? "unknown"}).`)
+  }
+
+  const [originX, originY] = image.getOrigin()
+  const [resolutionX, resolutionY] = image.getResolution()
+  if (!Number.isFinite(originX) || !Number.isFinite(originY) ||
+    !Number.isFinite(resolutionX) || !Number.isFinite(resolutionY) ||
+    resolutionX <= 0 || resolutionY >= 0) {
+    throw new Error("The citywide DEM has an unsupported georeferencing transform.")
+  }
+
+  const selectionBounds = getSelectionBounds(selection)
+  const projectedCorners = [
+    wgs84ToCitywideDEM.forward([selectionBounds.west, selectionBounds.south]),
+    wgs84ToCitywideDEM.forward([selectionBounds.west, selectionBounds.north]),
+    wgs84ToCitywideDEM.forward([selectionBounds.east, selectionBounds.south]),
+    wgs84ToCitywideDEM.forward([selectionBounds.east, selectionBounds.north]),
+  ]
+  const columnsInView = projectedCorners.map(([easting]) => (easting - originX) / resolutionX)
+  const rowsInView = projectedCorners.map(([, northing]) => (northing - originY) / resolutionY)
+  const width = image.getWidth()
+  const height = image.getHeight()
+  const left = Math.max(0, Math.floor(Math.min(...columnsInView)))
+  const top = Math.max(0, Math.floor(Math.min(...rowsInView)))
+  const right = Math.min(width, Math.ceil(Math.max(...columnsInView)))
+  const bottom = Math.min(height, Math.ceil(Math.max(...rowsInView)))
+  if (right <= left || bottom <= top) {
+    throw new Error("The selected area is outside the citywide DEM coverage.")
+  }
+
+  const footprint = [
+    [left, top],
+    [right, top],
+    [right, bottom],
+    [left, bottom],
+  ].map(([column, row]) => {
+    const [longitude, latitude] = citywideDEMToWgs84.forward([
+      originX + column * resolutionX,
+      originY + row * resolutionY,
+    ])
+    return [latitude, longitude] as [number, number]
+  })
+  const longitudes = footprint.map(([, longitude]) => longitude)
+  const latitudes = footprint.map(([latitude]) => latitude)
+
+  return {
+    window: [left, top, right, bottom],
+    columns: right - left,
+    rows: bottom - top,
+    footprint,
+    bounds: {
+      west: Math.min(...longitudes),
+      east: Math.max(...longitudes),
+      south: Math.min(...latitudes),
+      north: Math.max(...latitudes),
+    },
+  }
+}
+
+async function getCitywideDEMImage(signal?: AbortSignal) {
+  citywideDEMImagePromise ??= import("geotiff")
+    .then(({ fromUrl }) => fromUrl(citywideDEMCogUrl, {}, signal))
+    .then((tiff) => tiff.getImage())
+    .catch((error: unknown) => {
+      citywideDEMImagePromise = undefined
+      throw error
+    })
+  return citywideDEMImagePromise
+}
+
+function getCitywideDEMRaster(
+  image: GeoTIFFImage,
+  selectionWindow: ReturnType<typeof getCitywideDEMWindow>,
+  signal?: AbortSignal,
+) {
+  signal?.throwIfAborted()
+  const windowKey = selectionWindow.window.join(",")
+  if (citywideDEMRasterWindowKey === windowKey && citywideDEMRasterWindowPromise) {
+    return citywideDEMRasterWindowPromise
+  }
+
+  const request = image.readRasters({
+    window: selectionWindow.window,
+    samples: [0],
+    interleave: true,
+    signal,
+  }).then((raster) => {
+    if (raster.width !== selectionWindow.columns || raster.height !== selectionWindow.rows) {
+      throw new Error("The citywide DEM returned an incomplete raster window.")
+    }
+    if (!(raster instanceof Float32Array)) {
+      throw new Error("The citywide DEM has an unsupported raster sample type.")
+    }
+    return raster
+  })
+  citywideDEMRasterWindowKey = windowKey
+  citywideDEMRasterWindowPromise = request.catch((error: unknown) => {
+    if (citywideDEMRasterWindowKey === windowKey) {
+      citywideDEMRasterWindowKey = undefined
+      citywideDEMRasterWindowPromise = undefined
+    }
+    throw error
+  })
+  return citywideDEMRasterWindowPromise
+}
+
+async function createDemTerrainImage(
+  raster: Float32Array,
+  selectionWindow: ReturnType<typeof getCitywideDEMWindow>,
+  noData: number | null,
+  signal?: AbortSignal,
+) {
+  let minimum = Number.POSITIVE_INFINITY
+  let maximum = Number.NEGATIVE_INFINITY
+  for (let row = 0; row < selectionWindow.rows; row++) {
+    if (row > 0 && row % 32 === 0) await yieldToBrowser(signal)
+    for (let column = 0; column < selectionWindow.columns; column++) {
+      const elevation = raster[row * selectionWindow.columns + column]
+      if (!Number.isFinite(elevation) || elevation === noData) continue
+      minimum = Math.min(minimum, elevation)
+      maximum = Math.max(maximum, elevation)
+    }
+  }
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum)) {
+    throw new Error("The selected citywide DEM window contains no valid elevation samples.")
+  }
+
+  const canvas = document.createElement("canvas")
+  canvas.width = selectionWindow.columns
+  canvas.height = selectionWindow.rows
+  const context = canvas.getContext("2d")
+  if (!context) throw new Error("Could not create a canvas for the DEM Terrain preview.")
+
+  const imageData = context.createImageData(selectionWindow.columns, selectionWindow.rows)
+  const elevationRange = maximum - minimum || 1
+  for (let row = 0; row < selectionWindow.rows; row++) {
+    if (row > 0 && row % 32 === 0) await yieldToBrowser(signal)
+    for (let column = 0; column < selectionWindow.columns; column++) {
+      const index = row * selectionWindow.columns + column
+      const elevation = raster[index]
+      if (!Number.isFinite(elevation) || elevation === noData) continue
+      const colorIndex = Math.round(Math.max(0, Math.min(1, (elevation - minimum) / elevationRange)) * 255) * 3
+      const pixelIndex = index * 4
+      imageData.data[pixelIndex] = demTerrainColorLookup[colorIndex]
+      imageData.data[pixelIndex + 1] = demTerrainColorLookup[colorIndex + 1]
+      imageData.data[pixelIndex + 2] = demTerrainColorLookup[colorIndex + 2]
+      imageData.data[pixelIndex + 3] = 255
+    }
+  }
+  context.putImageData(imageData, 0, 0)
+  signal?.throwIfAborted()
+
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("Could not encode the DEM Terrain preview image."))
+        return
+      }
+      resolve(blob)
+    }, "image/png")
+  })
+}
+
+export async function loadDemTerrainExtent(map: LeafletMap, selection: MapSelection, signal?: AbortSignal) {
+  const image = await getCitywideDEMImage(signal)
+  signal?.throwIfAborted()
+  const selectionWindow = getCitywideDEMWindow(image, selection)
+  const raster = await getCitywideDEMRaster(image, selectionWindow, signal)
+  const imageBlob = await createDemTerrainImage(raster, selectionWindow, image.getGDALNoData(), signal)
+  signal?.throwIfAborted()
+  const imageUrl = URL.createObjectURL(imageBlob)
+  const layer = getMapOverlays(map).demTerrain
+  layer.clearLayers()
+  const previousImageUrl = demTerrainOverlayUrls.get(map)
+  if (previousImageUrl) URL.revokeObjectURL(previousImageUrl)
+  demTerrainOverlayUrls.set(map, imageUrl)
+  const imageOverlay = L.imageOverlay(imageUrl, [
+    [selectionWindow.bounds.south, selectionWindow.bounds.west],
+    [selectionWindow.bounds.north, selectionWindow.bounds.east],
+  ], {
+    opacity: 0.9,
+    interactive: false,
+    alt: "Colorized DEM Terrain elevation window",
+    pane: demTerrainPaneName,
+  })
+  const imageLoaded = new Promise<void>((resolve, reject) => {
+    imageOverlay.once("load", () => resolve())
+    imageOverlay.once("error", () => reject(new Error("Could not render the DEM Terrain preview image.")))
+  })
+  imageOverlay.addTo(layer)
+  try {
+    await imageLoaded
+  } catch (error) {
+    layer.removeLayer(imageOverlay)
+    URL.revokeObjectURL(imageUrl)
+    demTerrainOverlayUrls.delete(map)
+    throw error
+  }
+
+  return selectionWindow.columns * selectionWindow.rows
+}
+
+async function loadDemTerrainMesh(selection: MapSelection, signal?: AbortSignal): Promise<DEMMesh> {
+  const image = await getCitywideDEMImage(signal)
+  signal?.throwIfAborted()
+  const selectionWindow = getCitywideDEMWindow(image, selection)
+  const raster = await getCitywideDEMRaster(image, selectionWindow, signal)
+  const noData = image.getGDALNoData()
+  const [originX, originY] = image.getOrigin()
+  const [resolutionX, resolutionY] = image.getResolution()
+  const vertexCount = selectionWindow.columns * selectionWindow.rows
+  const vertices: DEMVertex[] = new Array(vertexCount)
+  const valid = new Uint8Array(vertexCount)
+  let validCount = 0
+  for (let row = 0; row < selectionWindow.rows; row++) {
+    if (row > 0 && row % 32 === 0) await yieldToBrowser(signal)
+    for (let column = 0; column < selectionWindow.columns; column++) {
+      const index = row * selectionWindow.columns + column
+      const elevation = Number(raster[index])
+      const isValid = Number.isFinite(elevation) && (noData === null || elevation !== noData)
+      const [longitude, latitude] = citywideDEMToWgs84.forward([
+        originX + (selectionWindow.window[0] + column + 0.5) * resolutionX,
+        originY + (selectionWindow.window[1] + row + 0.5) * resolutionY,
+      ])
+      vertices[index] = [longitude, latitude, isValid ? elevation : 0]
+      if (isValid) {
+        valid[index] = 1
+        validCount++
+      }
+    }
+  }
+  if (!validCount) throw new Error("The selected citywide DEM window contains no valid elevation samples.")
+
+  return {
+    file: "DEM_Calgary_COG",
+    bounds: selectionWindow.bounds,
+    vertices,
+    faces: [],
+    grid: { columns: selectionWindow.columns, rows: selectionWindow.rows, valid },
+  }
 }
 
 async function fetchTreesInArea(selection: MapSelection, signal?: AbortSignal) {
@@ -634,7 +918,7 @@ export async function loadBuildingsInArea(map: LeafletMap, selection: MapSelecti
 
 type DEMSurface = (longitude: number, latitude: number) => number | undefined
 
-export type MapOverlayName = "buildings" | "trees" | "terrain" | "roads" | "parcels"
+export type MapOverlayName = "buildings" | "trees" | "terrain" | "demTerrain" | "roads" | "parcels"
 export type ExportSelection = Record<MapOverlayName, boolean>
 
 export function setMapOverlayVisibility(map: LeafletMap, name: MapOverlayName, visible: boolean) {
@@ -916,27 +1200,39 @@ async function appendDEMMeshes(
   origin: [number, number],
   firstVertexIndex: number,
   signal: AbortSignal,
+  groupName = "Terrain",
 ) {
   let vertexIndex = firstVertexIndex
   let processedItems = 0
-  lines.push("g Terrain")
+  lines.push(`g ${groupName}`)
   for (const mesh of meshes) {
     lines.push(`o terrain_${mesh.file.replace(/[^a-zA-Z0-9_-]/g, "_")}`)
-    for (const [longitude, latitude, elevation] of mesh.vertices) {
+    const firstMeshVertexIndex = vertexIndex
+    const valid = mesh.grid?.valid
+    const vertexIndices = valid ? new Uint32Array(mesh.vertices.length) : undefined
+    for (const [meshVertexIndex, [longitude, latitude, elevation]] of mesh.vertices.entries()) {
       if (processedItems > 0 && processedItems % 10000 === 0) await yieldToBrowser(signal)
+      processedItems++
+      if (valid && !valid[meshVertexIndex]) continue
       const local = toLocalMeters(longitude, latitude, origin)
       lines.push(`v ${local.x.toFixed(3)} ${elevation.toFixed(3)} ${local.z.toFixed(3)}`)
-      processedItems++
+      if (vertexIndices) vertexIndices[meshVertexIndex] = vertexIndex
+      vertexIndex++
     }
     if (mesh.grid) {
-      const { columns, rows } = mesh.grid
+      const { columns, rows, valid } = mesh.grid
       for (let row = 0; row < rows - 1; row++) {
         for (let column = 0; column < columns - 1; column++) {
           if (processedItems > 0 && processedItems % 10000 === 0) await yieldToBrowser(signal)
-          const a = vertexIndex + row * columns + column
-          const b = a + 1
-          const c = a + columns
-          const d = c + 1
+          const aIndex = row * columns + column
+          const bIndex = aIndex + 1
+          const cIndex = aIndex + columns
+          const dIndex = cIndex + 1
+          if (valid && (!valid[aIndex] || !valid[bIndex] || !valid[cIndex] || !valid[dIndex])) continue
+          const a = vertexIndices ? vertexIndices[aIndex] : firstMeshVertexIndex + aIndex
+          const b = vertexIndices ? vertexIndices[bIndex] : firstMeshVertexIndex + bIndex
+          const c = vertexIndices ? vertexIndices[cIndex] : firstMeshVertexIndex + cIndex
+          const d = vertexIndices ? vertexIndices[dIndex] : firstMeshVertexIndex + dIndex
           lines.push(`f ${a} ${b} ${d}`)
           lines.push(`f ${a} ${d} ${c}`)
           processedItems++
@@ -945,13 +1241,27 @@ async function appendDEMMeshes(
     } else {
       for (const face of mesh.faces) {
         if (processedItems > 0 && processedItems % 10000 === 0) await yieldToBrowser(signal)
-        lines.push(`f ${face.map((index) => vertexIndex + index).join(" ")}`)
+        lines.push(`f ${face.map((index) => firstMeshVertexIndex + index).join(" ")}`)
         processedItems++
       }
     }
-    vertexIndex += mesh.vertices.length
   }
+  return vertexIndex
 }
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
+// -------------------- OBJ EXPORT --------------------
 // -------------------- OBJ EXPORT --------------------
 
 async function saveObj(
@@ -960,6 +1270,7 @@ async function saveObj(
   roads: Road[],
   parcels: ParcelFeatureCollection["features"],
   terrainMeshes: DEMMesh[],
+  demTerrainMeshes: DEMMesh[],
   includeTerrain: boolean,
   bounds: ViewBounds,
   signal: AbortSignal,
@@ -1013,7 +1324,13 @@ async function saveObj(
   const nextTreeVertexIndex = await appendTreeCylinders(lines, trees, origin, vertexIndex, sampleTerrain, signal)
   const nextRoadVertexIndex = await appendRoadPolylines(lines, roads, origin, nextTreeVertexIndex, sampleTerrain, signal)
   const parcelResult = await appendParcelBoundaries(lines, parcels, origin, nextRoadVertexIndex, sampleTerrain, bounds, signal)
-  if (includeTerrain) await appendDEMMeshes(lines, terrainMeshes, origin, parcelResult.vertexIndex, signal)
+  let nextVertexIndex = parcelResult.vertexIndex
+  if (includeTerrain) {
+    nextVertexIndex = await appendDEMMeshes(lines, terrainMeshes, origin, nextVertexIndex, signal)
+  }
+  if (demTerrainMeshes.length) {
+    await appendDEMMeshes(lines, demTerrainMeshes, origin, nextVertexIndex, signal, "DEM_Terrain")
+  }
 
   signal.throwIfAborted()
   const blob = new Blob([`${lines.join("\n")}\n`], { type: "text/plain" })
@@ -1035,22 +1352,29 @@ export async function exportBuildingsObj(
 ) {
   const bounds = getSelectionBounds(selection)
   const needsTerrainForHeights = exportSelection.trees || exportSelection.roads || exportSelection.parcels
-  const [features, trees, roads, parcels, terrainMeshes] = await Promise.all([
+  const [features, trees, roads, parcels, terrainMeshes, demTerrainMeshes] = await Promise.all([
     exportSelection.buildings ? loadDetailedFeatures(selection, signal) : Promise.resolve([]),
     exportSelection.trees ? fetchTreesInArea(selection, signal) : Promise.resolve([]),
     exportSelection.roads ? fetchRoadsInArea(selection, signal) : Promise.resolve([]),
     exportSelection.parcels ? fetchParcelsInArea(selection, signal) : Promise.resolve([]),
     exportSelection.terrain || needsTerrainForHeights ? loadDEMMeshes(selection, signal) : Promise.resolve([]),
+    exportSelection.demTerrain
+      ? loadDemTerrainMesh(selection, signal).then((mesh) => [mesh])
+      : Promise.resolve([] as DEMMesh[]),
   ])
   signal.throwIfAborted()
   const treesAtGround = exportSelection.trees ? await sampleTreeGroundHeights(terrainMeshes, trees) : []
   signal.throwIfAborted()
-  const parcelCount = await saveObj(features, treesAtGround, roads, parcels, terrainMeshes, exportSelection.terrain, bounds, signal)
+  const parcelCount = await saveObj(features, treesAtGround, roads, parcels, terrainMeshes, demTerrainMeshes, exportSelection.terrain, bounds, signal)
   return {
     buildingCount: features.length,
     treeCount: treesAtGround.length,
     roadCount: roads.length,
     parcelCount,
     terrainChunkCount: exportSelection.terrain ? terrainMeshes.length : 0,
+    demTerrainVertexCount: demTerrainMeshes.reduce((count, mesh) =>
+      count + (mesh.grid?.valid
+        ? mesh.grid.valid.reduce((validCount, isValid) => validCount + isValid, 0)
+        : mesh.vertices.length), 0),
   }
 }
