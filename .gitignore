@@ -39,5 +39,10 @@ Thumbs.db
 #QGIS Data
 QGIS/
 
+# Ignore documentation files except the folder README
+/0_Docs/*
+!/0_Docs/README.md
+
 #README
-README.md
+
+# Other

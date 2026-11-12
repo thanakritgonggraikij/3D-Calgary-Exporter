@@ -55,10 +55,9 @@
     --muted-foreground: 190 10% 43%;
     --accent: 39 88% 93%;
     --accent-foreground: 190 24% 16%;
-    --border: 40 15% 84%;
-    --input: 40 15% 80%;
+    --border-color: #000000bf;
     --ring: 188 78% 29%;
-    --radius: 0rem;
+    --radius: 1rem;
   }
 
   html,
@@ -76,22 +75,27 @@
 
 .app-shell,
 .controls,
-.controls h3,
-.controls p,
-.controls ol,
+.h3,
+.p,
+.ol,
 .status,
-.cesium-error,
-.controls button,
-.controls button *,
-.controls code {
+.map-error,
+.button,
+.button *,
+.code {
   font-family: "ABC Monument Grotesk", Arial, sans-serif;
 }
 
 .app-shell,
-.cesium-viewer,
-.cesium-container {
+.leaflet-viewer,
+.leaflet-container {
   width: 100%;
   height: 100%;
+}
+
+.leaflet-viewer {
+  position: relative;
+  z-index: 0;
 }
 
 .app-shell {
@@ -99,38 +103,95 @@
   overflow: hidden;
 }
 
+.map-search {
+  position: relative;
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  border: 2px solid var(--border-color);
+  background: #fff;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.map-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  padding: 0.65rem 0.75rem;
+  color: #171717;
+  font: inherit;
+}
+
+.map-search button {
+  display: grid;
+  width: 2rem;
+  place-items: center;
+  border: 0;
+  border-left: 2px solid var(--border-color);
+  background: #fff;
+  color: #304462;
+  cursor: pointer;
+  padding: 0rem !important;
+}
+
+.map-search button:disabled {
+  cursor: wait;
+}
+
+.map-search button.clear-search {
+  width: 2rem;
+  border-left: 2px solid var(--border-color);
+}
+
+.map-search-error {
+  flex-basis: 100%;
+  margin: 0;
+  border-top: 1px solid var(--border-color);
+  padding: 0.5rem 0.75rem;
+  color: #792d35;
+  font-size: 0.8125rem;
+}
+
 .controls {
   position: absolute;
-  top: 1.25rem;
-  left: 1.25rem;
+  top: 1rem;
+  right: 1rem;
+  bottom: 1rem;
   z-index: 10;
   width: min(22rem, calc(100vw - 2.5rem));
   max-height: calc(100vh - 2.5rem);
-  overflow-y: auto;
+  overflow: visible;
   font-family: "ABC Monument Grotesk", Arial, sans-serif;
-  /* border-radius: 1rem; */
+  border-radius: var(--radius);
   scrollbar-width: thin;
-  scrollbar-color: hsl(var(--border)) transparent;
-  border: 2px solid rgba(0, 0, 0, 0.72);
+  scrollbar-color: var(--border-color) transparent;
+  border: 2px solid var(--border-color);
 }
 
-.controls > div {
+.controls .drawer-toggle {
+  display: none;
+}
+
+.controls>div {
+  height: 100%;
   overflow: hidden;
+  overflow-y: auto;
   border: 2px solid rgb(255 255 255 / 72%);
   /* border-radius: 1rem; */
   background: rgb(255 255 255 / 100%);
-  box-shadow:
+  /* box-shadow:
     0 1.5rem 4rem rgb(18 43 48 / 18%),
-    0 0.25rem 0.75rem rgb(18 43 48 / 8%);
+    0 0.25rem 0.75rem rgb(18 43 48 / 8%); */
   backdrop-filter: blur(18px);
 }
 
-.controls > div > div:first-child {
+.controls>div>div:first-child {
   gap: 0.2rem;
   padding: 1.4rem 1.4rem 1rem;
 }
 
-.controls .controls-title {
+.controls .title {
   color: hsl(var(--foreground));
   font-family: "ABC Monument Grotesk", Arial, sans-serif;
   font-size: 3rem;
@@ -138,6 +199,7 @@
   letter-spacing: -0.015em;
   line-height: 0.9;
 }
+
 
 .controls .controls-subtitle {
   margin: 0;
@@ -148,17 +210,46 @@
   text-transform: none;
 }
 
-.controls h3 {
+.controls h3,
+.purpose-dialog h3 {
   color: hsl(var(--foreground));
   font-size: 1rem;
   padding: 0.25rem 0rem 0rem;
   font-weight: 600;
-  letter-spacing: 0.09em;
-  line-height: 1.4;
+  letter-spacing: -0.01rem;
+  line-height: 1.25;
   text-transform: none;
 }
 
-.controls > div > div:nth-child(2) {
+.controls .how-to-use-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.controls .how-to-use-toggle:not(:disabled):hover {
+  transform: none;
+  background: transparent;
+  color: hsl(var(--foreground));
+}
+
+.controls .how-to-use-toggle svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
+.controls>div>div:nth-child(2) {
   padding: 0 1.4rem 1.4rem;
 }
 
@@ -183,59 +274,157 @@
   list-style: none;
 }
 
+.export-steps li,
+.purpose-dialog p {
+  color: #171717;
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
 .export-steps li {
   position: relative;
   min-height: 1.5rem;
   padding-left: 1.85rem;
-  color: #171717;
-  font-size: 1rem;
-  line-height: 1.15;
   padding: 0rem 0rem 0.25rem 1.85rem;
   counter-increment: export-step;
 }
 
-  .export-steps li::before {
-    position: absolute;
-    top: 0.02rem;
-    left: 0;
-    color: #171717;
-    content: "[" counter(export-step) "]";
-    font-size: 1rem;
-    font-weight: 700;
-    line-height: 1.15;
-  }
+.export-steps li::before {
+  position: absolute;
+  top: 0.02rem;
+  left: 0;
+  color: #171717;
+  content: "[" counter(export-step) "]";
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
 
 .controls hr {
   height: 1px;
   margin: 0.35rem 0;
   border: 0;
-  background: hsl(var(--border) / 70%);
+  background: var(--border-color);
 }
 
 .controls button {
-  min-height: 2.85rem;
-  /* border-radius: 0.7rem; */
+  min-height: 2.25rem;
+  padding: 0.5rem 0.75rem;
   /* background-color: #111; */
-  border-color: #111;
+  border-color: var(--border-color);
   border-width: 2px;
   color: #020202;
   font-weight: 600;
   cursor: pointer;
   transition:
-    transform 160ms ease,
-    box-shadow 160ms ease,
     background-color 160ms ease;
 }
 
 .controls button:not(:disabled):hover {
-  transform: translateY(-1px);
-  background-color: black;
+  background-color: var(--border-color);
   color: white;
 }
 
+.controls button.overlay-toggle[aria-pressed="true"] {
+  background-color: var(--border-color);
+  color: #fff;
+}
+
+.controls button.overlay-toggle[aria-pressed="true"]:not(:disabled):hover {
+  background-color: #fff;
+  color: #000;
+}
+
+.layer-control-header,
+.layer-control-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 2.25rem 2.25rem;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.layer-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.layer-control-header {
+  padding: 0 0.15rem 0.25rem;
+}
+
+.layer-control-header span,
+.layer-control-header button {
+  display: grid;
+  place-items: center;
+}
+
+.controls button.layer-header-toggle {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  min-height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+}
+
+.controls button.layer-header-toggle svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.layer-control-header svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.layer-control-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1rem;
+  font-weight: 600;
+  /* text-transform: uppercase; */
+  height: 100%;
+  padding-left: 0.5rem;
+}
+
+.layer-control-row {
+  padding: 0.25rem 0.25rem;
+  background-color: rgba(240, 240, 240, 0.984);
+  border-radius: var(--radius);
+
+}
+
+.layer-control-name svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: 0 0 auto;
+}
+
+.controls button.layer-toggle-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0.4rem;
+}
+
+.controls button.layer-toggle-icon[aria-pressed="true"] {
+  background-color: var(--border-color);
+  color: #fff;
+}
+
+.controls button.layer-toggle-icon[aria-pressed="true"]:not(:disabled):hover {
+  background-color: #fff;
+  color: #000;
+}
+
 .controls button.export-button {
-  color: black;
-  background-color: #000000;
+  background-color: var(--border-color);
   color: white;
 }
 
@@ -248,10 +437,11 @@
   cursor: wait;
 }
 
-.cesium-error {
+.map-error {
   position: absolute;
   right: 1rem;
   bottom: 1rem;
+  z-index: 1100;
   max-width: min(32rem, calc(100vw - 2rem));
   /* border-radius: 0.375rem; */
   background: #f8d7da;
@@ -260,8 +450,137 @@
   font-size: 0.875rem;
 }
 
+.parcel-data-windows {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 5;
+  display: flex;
+  width: min(22rem, calc(100vw - 2.5rem));
+  max-height: calc(100dvh - 2rem);
+  flex-direction: column;
+  gap: 0.25rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+  box-shadow:
+    0 1.5rem 4rem rgb(18 43 48 / 18%),
+    0 0.25rem 0.75rem rgb(18 43 48 / 8%);
+
+
+}
+
+.parcel-data-window {
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+}
+
+.parcel-details-window {
+  max-height: min(45dvh, 32rem);
+}
+
+.parcel-json-window summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.parcel-json-window summary::-webkit-details-marker {
+  display: none;
+}
+
+.parcel-json-window summary svg {
+  width: 1rem;
+  height: 1rem;
+  transition: transform 160ms ease;
+}
+
+.parcel-json-window[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.parcel-json-window pre {
+  max-height: min(45dvh, 32rem);
+  overflow: auto;
+  margin: 0;
+  padding: 0.75rem;
+  color: #171717;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: pre;
+}
+
+.parcel-json-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.parcel-json-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.parcel-json-close {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border-color);
+  background: #fff;
+  color: #020202;
+  cursor: pointer;
+}
+
+.parcel-json-close:hover {
+  background: var(--border-color);
+  color: #fff;
+}
+
+.parcel-json-close svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.parcel-details-list {
+  display: grid;
+  gap: 0.75rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.75rem;
+  max-height: min(38dvh, 26rem);
+}
+
+.parcel-details-list div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.parcel-details-list dt {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.parcel-details-list dd {
+  margin: 0;
+  color: #171717;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
 .status {
-  border: 1px solid transparent;
+  border: 1px solid var(--border-color);
   /* border-radius: 0.7rem; */
   padding: 0.75rem 0.875rem;
   font-size: 0.8125rem;
@@ -269,28 +588,334 @@
 }
 
 .status.success {
-  border-color: #b7dfc2;
   background: #eff9f1;
   color: #205c33;
 }
 
 .status.error {
-  border-color: #efc3c6;
   background: #fff1f1;
   color: #792d35;
 }
 
 .status.loading {
-  border-color: #bfd9e7;
   background: #eff8fc;
   color: #24566f;
 }
 
-@media (max-width: 480px) {
+.status.cancelled {
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+}
+
+.controls .purpose-trigger {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 0.5rem);
+  white-space: nowrap;
+}
+
+.purpose-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(80vw, 64rem);
+  height: min(60vw, 48rem, calc(100dvh - 2rem));
+  aspect-ratio: 4 / 3;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  padding: 1.5rem;
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius);
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  box-shadow:
+    0 1.5rem 4rem rgb(18 43 48 / 18%),
+    0 0.25rem 0.75rem rgb(18 43 48 / 8%);
+}
+
+.purpose-dialog::backdrop {
+  background: rgb(0 0 0 / 68%);
+}
+
+.purpose-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.purpose-header h2 {
+  color: hsl(var(--foreground));
+  font-family: "ABC Monument Grotesk", Arial, sans-serif;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 0.9;
+}
+
+
+.purpose-close {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 2px solid #111;
+  background: transparent;
+  color: #020202;
+  cursor: pointer;
+}
+
+.purpose-close:hover {
+  background: #000;
+  color: #fff;
+}
+
+.purpose-close svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.image-placeholder {
+  display: grid;
+  min-height: 8rem;
+  place-items: center;
+  text-align: center;
+}
+
+.purpose-goal p {
+  margin: 0 0 1rem;
+}
+
+.purpose-goal h3 {
+  color: hsl(var(--foreground));
+  font-family: "ABC Monument Grotesk", Arial, sans-serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+
+.purpose-main-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-bottom: 1rem;
+}
+
+.purpose-images {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.purpose-images .image-placeholder {
+  min-width: 0;
+  min-height: 10rem;
+  flex: 1 1 0;
+}
+
+@media (min-width: 768px) and (max-width: 1024px) {
   .controls {
     top: 0.75rem;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    width: min(20rem, calc(100vw - 1.5rem));
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  .parcel-data-windows {
+    top: 0.75rem;
     left: 0.75rem;
-    width: calc(100vw - 1.5rem);
-    max-height: calc(100vh - 1.5rem);
+    width: min(20rem, calc(100vw - 1.5rem));
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  .controls .purpose-trigger {
+    top: 0;
+  }
+
+  .controls .title,
+  .purpose-dialog .title {
+    font-size: 2.4rem;
+  }
+
+  .controls>div>div:first-child {
+    padding: 1.15rem 1.15rem 0.85rem;
+  }
+
+  .controls>div>div:nth-child(2) {
+    padding: 0 1.15rem 1.15rem;
+  }
+}
+
+@media (max-width: 767px) {
+  .parcel-data-windows {
+    top: 0.5rem;
+    left: 0;
+    width: 100%;
+    max-height: min(calc(100dvh - 7rem), 50dvh);
+  }
+
+  .controls {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: var(--drawer-height, 6rem);
+    max-height: none;
+    overflow: visible;
+    padding: 0.5rem;
+    background: hsl(var(--card));
+    border-top: 2px solid rgba(0, 0, 0, 0.72);
+    border-radius: var(--radius) var(--radius) 0 0;
+    box-shadow: 0 -0.5rem 1.5rem rgb(18 43 48 / 16%);
+    transition: height 220ms ease;
+  }
+
+  .controls .purpose-trigger {
+    top: auto;
+    right: auto;
+    bottom: calc(100% + 0.5rem);
+    left: 1rem;
+  }
+
+  .controls.is-dragging {
+    transition: none;
+  }
+
+  .controls>div {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .controls>div>div:first-child {
+    flex: 0 0 auto;
+    gap: 0.1rem;
+    padding: 0.3rem 0.85rem 0.55rem;
+  }
+
+  .controls>div>div:nth-child(2) {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 0.85rem calc(0.75rem + env(safe-area-inset-bottom));
+  }
+
+  .controls:not(.is-mobile-open)>div>div:nth-child(2) {
+    display: none;
+  }
+
+  .controls .drawer-toggle {
+    display: flex;
+    width: 100%;
+    min-height: 1.35rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.85rem;
+    line-height: 1;
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .controls .drawer-toggle:active {
+    cursor: grabbing;
+  }
+
+  .controls .drawer-toggle:not(:disabled):hover {
+    transform: none;
+    background: transparent;
+    color: hsl(var(--foreground));
+  }
+
+  .controls .drawer-toggle svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  .controls .title,
+  .purpose-dialog .title {
+    font-size: clamp(1.6rem, 7vw, 2rem);
+    line-height: 1;
+  }
+
+  .controls .controls-subtitle {
+    font-size: 0.95rem;
+    line-height: 1.1;
+  }
+
+  .controls h3,
+  .purpose-dialog h3 {
+    font-size: 0.9rem;
+  }
+
+  .controls button {
+    min-height: 2.65rem;
+    font-size: 0.875rem;
+  }
+
+  .map-search input {
+    min-height: 2.65rem;
+    font-size: 1rem;
+  }
+
+  .controls .export-steps li {
+    font-size: 0.9rem;
+  }
+
+  .purpose-dialog p {
+    font-size: 0.9rem;
+  }
+
+  .controls .status {
+    padding: 0.6rem 0.7rem;
+  }
+
+  .purpose-dialog {
+    width: calc(100vw - 2rem);
+    height: 75vh;
+  }
+
+  .purpose-images {
+    grid-template-columns: 1fr;
+  }
+
+}
+
+@media (max-width: 380px) {
+  .controls>div>div:first-child {
+    padding-right: 0.7rem;
+    padding-left: 0.7rem;
+  }
+
+  .controls>div>div:nth-child(2) {
+    padding-right: 0.7rem;
+    padding-left: 0.7rem;
+  }
+
+  .controls button {
+    padding: 0.4rem 0.55rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .controls {
+    transition: none;
   }
 }
