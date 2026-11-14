@@ -2,6 +2,7 @@ import * as L from "leaflet"
 import type { Map as LeafletMap } from "leaflet"
 import type { FeatureCollection, GeoJsonProperties, MultiPolygon, Polygon } from "geojson"
 import type { GeoTIFFImage } from "geotiff"
+import { Zip, ZipDeflate, ZipPassThrough } from "fflate"
 import proj4 from "proj4"
 
 const treesApi = "https://data.calgary.ca/resource/tfs4-3wwa.json"
@@ -10,8 +11,16 @@ const roadsGeoJsonBaseUrl = "https://pub-a06088b43d4e4619a6b98a66771604cf.r2.dev
 const chunksBaseUrl = "https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_chunks/"
 const demChunksBaseUrl = "https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_chunks/"
 const citywideDEMCogUrl = "https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_citywide/DEM_Calgary_COG.tif"
+const jawgAccessToken = "g0AxIlVuwiLdCnTtl4xavfenRJWvV4Z9Mq29FsLOMlYZYjKa1Uwtxfu4TfzskiKN"
+const satelliteTileBaseUrl = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile"
+const jawgTerrainTileZoom = 16
+const satelliteTileZoom = 19
+const minimumTerrainTileZoom = 10
+const maximumTerrainTextureDimension = 16384
+export const jawgTerrainTileLayerUrl = `https://tile.jawg.io/jawg-terrain/{z}/{x}/{y}{r}.png?access-token=${jawgAccessToken}`
 const citywideDEMProjection = "+proj=tmerc +lat_0=0 +lon_0=-114 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs +type=crs"
 const demTerrainPaneName = "demTerrainPane"
+const jawgTileSize = 256
 proj4.defs("EPSG:3776", citywideDEMProjection)
 const wgs84ToCitywideDEM = proj4("EPSG:4326", "EPSG:3776")
 const citywideDEMToWgs84 = proj4("EPSG:3776", "EPSG:4326")
@@ -55,7 +64,12 @@ const treeCylinderSegments = 16
 const selectionRadiusMeters = 1200
 
 type ViewBounds = { north: number; south: number; east: number; west: number }
-export type MapSelection = { longitude: number; latitude: number }
+export type MapSelection = {
+  longitude: number
+  latitude: number
+  latitudeRadiusMeters?: number
+  longitudeRadiusMeters?: number
+}
 type DEMChunk = { file: string; bounds: ViewBounds }
 type DEMChunksIndex = {
   chunks: DEMChunk[]
@@ -71,6 +85,7 @@ type DEMMesh = {
   faces: number[][]
   grid?: { columns: number; rows: number; valid?: Uint8Array }
 }
+type TerrainTexture = { blob: Blob }
 type Coordinate = [number, number, number?]
 type BuildingGeometry =
   | { type: "Polygon"; coordinates: Coordinate[][] }
@@ -149,14 +164,23 @@ function getMapOverlays(map: LeafletMap): MapOverlays {
 
 export function getSelectionBounds(selection: MapSelection): ViewBounds {
   const radians = Math.PI / 180
-  const latitudeRadius = selectionRadiusMeters / 111320
-  const longitudeRadius = selectionRadiusMeters / (111320 * Math.max(Math.cos(selection.latitude * radians), 0.1))
+  const latitudeRadius = (selection.latitudeRadiusMeters ?? selectionRadiusMeters) / 111320
+  const longitudeRadius = (selection.longitudeRadiusMeters ?? selectionRadiusMeters) /
+    (111320 * Math.max(Math.cos(selection.latitude * radians), 0.1))
   return {
     north: selection.latitude + latitudeRadius,
     south: selection.latitude - latitudeRadius,
     east: selection.longitude + longitudeRadius,
     west: selection.longitude - longitudeRadius,
   }
+}
+
+function getJawgTerrainTileUrl(zoom: number, x: number, y: number) {
+  return jawgTerrainTileLayerUrl
+    .replace("{z}", String(zoom))
+    .replace("{x}", String(x))
+    .replace("{y}", String(y))
+    .replace("{r}", "")
 }
 
 function getIntersectingChunks<T extends { bounds: ViewBounds }>(chunks: T[], selection: MapSelection): T[] {
@@ -934,6 +958,109 @@ async function yieldToBrowser(signal?: AbortSignal) {
   signal?.throwIfAborted()
 }
 
+function getTilePosition(longitude: number, latitude: number, zoom: number) {
+  const tileCount = 2 ** zoom
+  const radians = Math.max(-85.05112878, Math.min(85.05112878, latitude)) * Math.PI / 180
+  return {
+    x: (longitude + 180) / 360 * tileCount,
+    y: (1 - Math.asinh(Math.tan(radians)) / Math.PI) / 2 * tileCount,
+  }
+}
+
+function getTerrainTextureZoom(bounds: ViewBounds, preferredZoom: number) {
+  for (let zoom = preferredZoom; zoom >= minimumTerrainTileZoom; zoom--) {
+    const northwest = getTilePosition(bounds.west, bounds.north, zoom)
+    const southeast = getTilePosition(bounds.east, bounds.south, zoom)
+    const width = Math.ceil((southeast.x - northwest.x) * jawgTileSize)
+    const height = Math.ceil((southeast.y - northwest.y) * jawgTileSize)
+    if (width <= maximumTerrainTextureDimension && height <= maximumTerrainTextureDimension) return zoom
+  }
+  return minimumTerrainTileZoom
+}
+
+async function loadTerrainTexture(
+  bounds: ViewBounds,
+  signal: AbortSignal,
+  preferredZoom: number,
+  getTileUrl: (zoom: number, x: number, y: number) => string,
+  sourceName: string,
+  outputType: "image/png" | "image/jpeg",
+): Promise<TerrainTexture> {
+  const zoom = getTerrainTextureZoom(bounds, preferredZoom)
+  const northwest = getTilePosition(bounds.west, bounds.north, zoom)
+  const southeast = getTilePosition(bounds.east, bounds.south, zoom)
+  const minTileX = Math.floor(northwest.x)
+  const maxTileX = Math.floor(southeast.x)
+  const minTileY = Math.floor(northwest.y)
+  const maxTileY = Math.floor(southeast.y)
+  const columns = maxTileX - minTileX + 1
+  const rows = maxTileY - minTileY + 1
+  const canvas = document.createElement("canvas")
+  canvas.width = Math.ceil((southeast.x - northwest.x) * jawgTileSize)
+  canvas.height = Math.ceil((southeast.y - northwest.y) * jawgTileSize)
+  const context = canvas.getContext("2d")
+  if (!context) throw new Error(`Could not create a canvas for the ${sourceName} texture.`)
+
+  let nextTileIndex = 0
+  const workerCount = Math.min(12, columns * rows)
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextTileIndex < columns * rows) {
+      signal.throwIfAborted()
+      const tileIndex = nextTileIndex++
+      const tileX = minTileX + tileIndex % columns
+      const tileY = minTileY + Math.floor(tileIndex / columns)
+      const response = await fetch(getTileUrl(zoom, tileX, tileY), { signal })
+      if (!response.ok) throw new Error(`${sourceName} tile request failed (${response.status}) for tile ${tileX}, ${tileY}.`)
+      const bitmap = await createImageBitmap(await response.blob())
+      try {
+        context.drawImage(
+          bitmap,
+          (tileX - northwest.x) * jawgTileSize,
+          (tileY - northwest.y) * jawgTileSize,
+        )
+      } finally {
+        bitmap.close()
+      }
+    }
+  }))
+
+  signal.throwIfAborted()
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((result) => {
+      if (!result) {
+        reject(new Error(`Could not encode the ${sourceName} texture image.`))
+        return
+      }
+      resolve(result)
+    }, outputType, outputType === "image/jpeg" ? 0.96 : undefined)
+  })
+  canvas.width = 0
+  canvas.height = 0
+  return { blob }
+}
+
+function loadJawgTerrainTexture(bounds: ViewBounds, signal: AbortSignal) {
+  return loadTerrainTexture(
+    bounds,
+    signal,
+    jawgTerrainTileZoom,
+    (zoom, x, y) => getJawgTerrainTileUrl(zoom, x, y),
+    "Jawg basemap",
+    "image/png",
+  )
+}
+
+function loadSatelliteTexture(bounds: ViewBounds, signal: AbortSignal) {
+  return loadTerrainTexture(
+    bounds,
+    signal,
+    satelliteTileZoom,
+    (zoom, x, y) => `${satelliteTileBaseUrl}/${zoom}/${y}/${x}`,
+    "Esri satellite",
+    "image/jpeg",
+  )
+}
+
 function createDEMPointSampler(meshes: DEMMesh[]): DEMSurface {
   return (longitude, latitude) => {
     const bestMatch = meshes.find((mesh) =>
@@ -1201,15 +1328,28 @@ async function appendDEMMeshes(
   firstVertexIndex: number,
   signal: AbortSignal,
   groupName = "Terrain",
+  textureBounds?: ViewBounds,
+  firstTextureIndex = 1,
+  activeMaterial: "JawgTerrain" | "SatelliteTerrain" = "JawgTerrain",
 ) {
   let vertexIndex = firstVertexIndex
+  let textureIndex = firstTextureIndex
   let processedItems = 0
+  const textureNorthwest = textureBounds
+    ? getTilePosition(textureBounds.west, textureBounds.north, 0)
+    : undefined
+  const textureSoutheast = textureBounds
+    ? getTilePosition(textureBounds.east, textureBounds.south, 0)
+    : undefined
   lines.push(`g ${groupName}`)
   for (const mesh of meshes) {
+    if (textureBounds) lines.push(`usemtl ${activeMaterial}`)
     lines.push(`o terrain_${mesh.file.replace(/[^a-zA-Z0-9_-]/g, "_")}`)
     const firstMeshVertexIndex = vertexIndex
+    const firstMeshTextureIndex = textureIndex
     const valid = mesh.grid?.valid
     const vertexIndices = valid ? new Uint32Array(mesh.vertices.length) : undefined
+    const textureIndices = valid && textureBounds ? new Uint32Array(mesh.vertices.length) : undefined
     for (const [meshVertexIndex, [longitude, latitude, elevation]] of mesh.vertices.entries()) {
       if (processedItems > 0 && processedItems % 10000 === 0) await yieldToBrowser(signal)
       processedItems++
@@ -1217,6 +1357,14 @@ async function appendDEMMeshes(
       const local = toLocalMeters(longitude, latitude, origin)
       lines.push(`v ${local.x.toFixed(3)} ${elevation.toFixed(3)} ${local.z.toFixed(3)}`)
       if (vertexIndices) vertexIndices[meshVertexIndex] = vertexIndex
+      if (textureBounds && textureNorthwest && textureSoutheast) {
+        const tilePosition = getTilePosition(longitude, latitude, 0)
+        const u = (tilePosition.x - textureNorthwest.x) / (textureSoutheast.x - textureNorthwest.x)
+        const v = 1 - (tilePosition.y - textureNorthwest.y) / (textureSoutheast.y - textureNorthwest.y)
+        lines.push(`vt ${u.toFixed(6)} ${v.toFixed(6)}`)
+        if (textureIndices) textureIndices[meshVertexIndex] = textureIndex
+        textureIndex++
+      }
       vertexIndex++
     }
     if (mesh.grid) {
@@ -1233,20 +1381,93 @@ async function appendDEMMeshes(
           const b = vertexIndices ? vertexIndices[bIndex] : firstMeshVertexIndex + bIndex
           const c = vertexIndices ? vertexIndices[cIndex] : firstMeshVertexIndex + cIndex
           const d = vertexIndices ? vertexIndices[dIndex] : firstMeshVertexIndex + dIndex
-          lines.push(`f ${a} ${b} ${d}`)
-          lines.push(`f ${a} ${d} ${c}`)
+          if (textureBounds) {
+            const textureA = firstMeshTextureIndex + aIndex
+            const textureB = textureIndices ? textureIndices[bIndex] : textureA + 1
+            const textureC = textureIndices ? textureIndices[cIndex] : textureA + columns
+            const textureD = textureIndices ? textureIndices[dIndex] : textureC + 1
+            const mappedTextureA = textureIndices ? textureIndices[aIndex] : textureA
+            lines.push(`f ${a}/${mappedTextureA} ${b}/${textureB} ${d}/${textureD}`)
+            lines.push(`f ${a}/${mappedTextureA} ${d}/${textureD} ${c}/${textureC}`)
+          } else {
+            lines.push(`f ${a} ${b} ${d}`)
+            lines.push(`f ${a} ${d} ${c}`)
+          }
           processedItems++
         }
       }
     } else {
       for (const face of mesh.faces) {
         if (processedItems > 0 && processedItems % 10000 === 0) await yieldToBrowser(signal)
-        lines.push(`f ${face.map((index) => firstMeshVertexIndex + index).join(" ")}`)
+        lines.push(textureBounds
+          ? `f ${face.map((index) => `${firstMeshVertexIndex + index}/${firstMeshTextureIndex + index}`).join(" ")}`
+          : `f ${face.map((index) => firstMeshVertexIndex + index).join(" ")}`)
         processedItems++
       }
     }
   }
-  return vertexIndex
+  return { vertexIndex, textureIndex }
+}
+
+async function createExportArchive(
+  files: { filename: string; blob: Blob; compress: boolean }[],
+  signal: AbortSignal,
+) {
+  const chunks: Uint8Array<ArrayBuffer>[] = []
+  let resolveArchive: (blob: Blob) => void = () => {}
+  let rejectArchive: (error: Error) => void = () => {}
+  const archiveBlob = new Promise<Blob>((resolve, reject) => {
+    resolveArchive = resolve
+    rejectArchive = reject
+  })
+  const archive = new Zip((error, chunk, final) => {
+    if (error) {
+      rejectArchive(error)
+      return
+    }
+    if (chunk) chunks.push(chunk)
+    if (final) resolveArchive(new Blob(chunks, { type: "application/zip" }))
+  })
+  const entries = files.map(({ filename, blob, compress }) => {
+    const entry = compress
+      ? new ZipDeflate(filename, { level: 1 })
+      : new ZipPassThrough(filename)
+    archive.add(entry)
+    return { entry, blob }
+  })
+
+  try {
+    for (const { entry, blob } of entries) {
+      if (!blob) throw new Error("An export archive file is missing.")
+      const reader = blob.stream().getReader()
+      try {
+        while (true) {
+          signal.throwIfAborted()
+          const { done, value } = await reader.read()
+          entry.push(value ?? new Uint8Array(), done)
+          if (done) break
+        }
+      } finally {
+        reader.releaseLock()
+      }
+    }
+    archive.end()
+  } catch (error) {
+    archive.terminate()
+    throw error
+  }
+
+  return archiveBlob
+}
+
+function getTerrainTextureBounds(meshes: DEMMesh[], fallback: ViewBounds): ViewBounds {
+  if (!meshes.length) return fallback
+  return meshes.reduce((bounds, mesh) => ({
+    north: Math.max(bounds.north, mesh.bounds.north),
+    south: Math.min(bounds.south, mesh.bounds.south),
+    east: Math.max(bounds.east, mesh.bounds.east),
+    west: Math.min(bounds.west, mesh.bounds.west),
+  }), { ...meshes[0].bounds })
 }
 // -------------------- OBJ EXPORT --------------------
 // -------------------- OBJ EXPORT --------------------
@@ -1274,6 +1495,9 @@ async function saveObj(
   includeTerrain: boolean,
   bounds: ViewBounds,
   signal: AbortSignal,
+  terrainTextures?: { jawg: TerrainTexture; satellite: TerrainTexture },
+  textureBounds: ViewBounds = bounds,
+  activeMaterial: "JawgTerrain" | "SatelliteTerrain" = "JawgTerrain",
 ) {
   const firstRing = features.flatMap(getAllRings).find((ring) => ring.length)
   const origin: [number, number] = firstRing
@@ -1281,7 +1505,20 @@ async function saveObj(
     : trees[0]
       ? [trees[0].longitude, trees[0].latitude]
       : [(bounds.west + bounds.east) / 2, (bounds.south + bounds.north) / 2]
-  const lines = ["# Calgary 3D Context Export", "# Coordinates are local metres: X=East, Y=Up, Z=North", `# Origin: ${origin[0].toFixed(6)}, ${origin[1].toFixed(6)}`, ""]
+  const timestamp = Date.now()
+  const fileBase = `calgary_context_${timestamp}`
+  const lines = [
+    "# Calgary 3D Context Export",
+    "# Coordinates are local metres: X=East, Y=Up, Z=North",
+    `# Origin: ${origin[0].toFixed(6)}, ${origin[1].toFixed(6)}`,
+    ...(terrainTextures ? [
+      "# Jawg Terrain and Esri World Imagery textures",
+      "# Attribution: Jawg Maps, OpenStreetMap contributors",
+      "# Satellite imagery attribution: Tiles (C) Esri; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, GIS User Community",
+      `mtllib ${fileBase}.mtl`,
+    ] : []),
+    "",
+  ]
   let vertexIndex = 1
 
   const sampleTerrain = createDEMPointSampler(terrainMeshes)
@@ -1325,22 +1562,67 @@ async function saveObj(
   const nextRoadVertexIndex = await appendRoadPolylines(lines, roads, origin, nextTreeVertexIndex, sampleTerrain, signal)
   const parcelResult = await appendParcelBoundaries(lines, parcels, origin, nextRoadVertexIndex, sampleTerrain, bounds, signal)
   let nextVertexIndex = parcelResult.vertexIndex
+  let nextTextureIndex = 1
   if (includeTerrain) {
-    nextVertexIndex = await appendDEMMeshes(lines, terrainMeshes, origin, nextVertexIndex, signal)
+    const result = await appendDEMMeshes(
+      lines, terrainMeshes, origin, nextVertexIndex, signal, "Terrain",
+      terrainTextures ? textureBounds : undefined, 1, activeMaterial,
+    )
+    nextVertexIndex = result.vertexIndex
+    nextTextureIndex = result.textureIndex
   }
   if (demTerrainMeshes.length) {
-    await appendDEMMeshes(lines, demTerrainMeshes, origin, nextVertexIndex, signal, "DEM_Terrain")
+    await appendDEMMeshes(
+      lines, demTerrainMeshes, origin, nextVertexIndex, signal, "DEM_Terrain",
+      terrainTextures ? textureBounds : undefined, nextTextureIndex, activeMaterial,
+    )
   }
 
   signal.throwIfAborted()
-  const blob = new Blob([`${lines.join("\n")}\n`], { type: "text/plain" })
+  const objBlob = new Blob([`${lines.join("\n")}\n`], { type: "text/plain" })
   signal.throwIfAborted()
-  const url = URL.createObjectURL(blob)
+  const files = [
+    { blob: objBlob, filename: `${fileBase}.obj`, compress: true },
+    ...(terrainTextures ? [
+      {
+        blob: new Blob([
+          "# Jawg Terrain basemap material\n",
+          "# Attribution: Jawg Maps and OpenStreetMap contributors\n",
+          "newmtl JawgTerrain\n",
+          "Ka 1.000 1.000 1.000\n",
+          "Kd 1.000 1.000 1.000\n",
+          "Ks 0.000 0.000 0.000\n",
+          "d 1.0\n",
+          "illum 1\n",
+          `map_Kd ${fileBase}_jawg-terrain.png\n`,
+          "\n",
+          "# Esri World Imagery material\n",
+          "# Attribution: Tiles (C) Esri; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, GIS User Community\n",
+          "newmtl SatelliteTerrain\n",
+          "Ka 1.000 1.000 1.000\n",
+          "Kd 1.000 1.000 1.000\n",
+          "Ks 0.000 0.000 0.000\n",
+          "d 1.0\n",
+          "illum 1\n",
+          `map_Kd ${fileBase}_satellite.jpg\n`,
+        ], { type: "text/plain" }),
+        filename: `${fileBase}.mtl`,
+        compress: true,
+      },
+      { blob: terrainTextures.jawg.blob, filename: `${fileBase}_jawg-terrain.png`, compress: false },
+      { blob: terrainTextures.satellite.blob, filename: `${fileBase}_satellite.jpg`, compress: false },
+    ] : []),
+  ]
+  const archiveBlob = await createExportArchive(files, signal)
+  signal.throwIfAborted()
+  const url = URL.createObjectURL(archiveBlob)
   const link = document.createElement("a")
   link.href = url
-  link.download = `calgary_context_${Date.now()}.obj`
+  link.download = `${fileBase}.zip`
+  document.body.append(link)
   link.click()
-  URL.revokeObjectURL(url)
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   return parcelResult.parcelCount
 }
 
@@ -1349,6 +1631,7 @@ export async function exportBuildingsObj(
   selection: MapSelection,
   signal: AbortSignal,
   exportSelection: ExportSelection,
+  satelliteViewEnabled = false,
 ) {
   const bounds = getSelectionBounds(selection)
   const needsTerrainForHeights = exportSelection.trees || exportSelection.roads || exportSelection.parcels
@@ -1363,15 +1646,33 @@ export async function exportBuildingsObj(
       : Promise.resolve([] as DEMMesh[]),
   ])
   signal.throwIfAborted()
+  const textureMeshes = [
+    ...(exportSelection.terrain ? terrainMeshes : []),
+    ...demTerrainMeshes,
+  ]
+  const textureBounds = getTerrainTextureBounds(textureMeshes, bounds)
+  let terrainTextures: { jawg: TerrainTexture; satellite: TerrainTexture } | undefined
+  if (exportSelection.terrain || exportSelection.demTerrain) {
+    const jawg = await loadJawgTerrainTexture(textureBounds, signal)
+    const satellite = await loadSatelliteTexture(textureBounds, signal)
+    terrainTextures = { jawg, satellite }
+  }
+  signal.throwIfAborted()
   const treesAtGround = exportSelection.trees ? await sampleTreeGroundHeights(terrainMeshes, trees) : []
   signal.throwIfAborted()
-  const parcelCount = await saveObj(features, treesAtGround, roads, parcels, terrainMeshes, demTerrainMeshes, exportSelection.terrain, bounds, signal)
+  const parcelCount = await saveObj(
+    features, treesAtGround, roads, parcels, terrainMeshes, demTerrainMeshes,
+    exportSelection.terrain, bounds, signal, terrainTextures, textureBounds,
+    satelliteViewEnabled ? "SatelliteTerrain" : "JawgTerrain",
+  )
   return {
     buildingCount: features.length,
     treeCount: treesAtGround.length,
     roadCount: roads.length,
     parcelCount,
     terrainChunkCount: exportSelection.terrain ? terrainMeshes.length : 0,
+    terrainTexturesIncluded: Boolean(terrainTextures),
+    activeTerrainTexture: satelliteViewEnabled ? "Esri satellite" : "Jawg basemap",
     demTerrainVertexCount: demTerrainMeshes.reduce((count, mesh) =>
       count + (mesh.grid?.valid
         ? mesh.grid.valid.reduce((validCount, isValid) => validCount + isValid, 0)

@@ -3,6 +3,9 @@ STARTUP
 - npm run dev
 - OBJ exports can be cancelled while data is loading or being generated.
 - OBJ exports keep buildings, trees, roads, and terrain in named groups and preserve their individual objects. In Blender, enable **Split by Group** when importing to retain those category groups.
+- OBJ exports download as a ZIP. It contains Jawg basemap and Esri satellite textures; the currently selected map view is active on the DEM mesh. Extract the ZIP and import the OBJ in Blender. Both texture images and materials are included so you can switch later.
+- Basemap attribution: Jawg Maps and OpenStreetMap contributors.
+- Satellite imagery attribution: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community.
 
 SOURCES
 Trees: City of Calgary Open Data Portal (https://data.calgary.ca/Environment/Public-Trees/tfs4-3wwa/about_data)

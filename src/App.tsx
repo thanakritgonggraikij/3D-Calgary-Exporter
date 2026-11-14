@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent } from "react"
-import { ChevronDown, ChevronUp, Download, Eye, EyeOff, GripHorizontal, House, ListChecks, LoaderCircle, Mountain, RectangleHorizontal, Route, Search, Trees, X, type LucideIcon } from "lucide-react"
+import { ChevronDown, ChevronUp, Download, Eye, EyeOff, GripHorizontal, House, ListChecks, LoaderCircle, Mountain, RectangleHorizontal, Route, Satellite, Search, Trees, X, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import LeafletViewer from "@/map/LeafletViewer"
-import { exportBuildingsObj, loadBuildingsInArea, loadDEMExtent, loadParcelsInArea, loadRoadsInArea, loadTreesInArea, loadDemTerrainExtent, setMapOverlayVisibility, setParcelClickHandler } from "@/map/data"
+import { exportBuildingsObj, getSelectionBounds, loadBuildingsInArea, loadDEMExtent, loadParcelsInArea, loadRoadsInArea, loadTreesInArea, loadDemTerrainExtent, setMapOverlayVisibility, setParcelClickHandler } from "@/map/data"
 import type { MapOverlayName, MapSelection, ParcelFeature } from "@/map/data"
 import type { Map as LeafletMap } from "leaflet"
 
@@ -12,6 +12,11 @@ type DrawerStyle = CSSProperties & { "--drawer-height": string }
 
 function formatParcelValue(value: unknown) {
   return value === null || value === undefined || value === "" ? "Not available" : String(value)
+}
+
+function getSelectionKey(selection: MapSelection) {
+  const bounds = getSelectionBounds(selection)
+  return `${bounds.west},${bounds.south},${bounds.east},${bounds.north}`
 }
 
 function getActionLabel(name: string) {
@@ -59,6 +64,7 @@ const visibleLayerControls = layerControls.filter(({ name }) => name !== "terrai
 
 export default function App() {
   const [map, setMap] = useState<LeafletMap | null>(null)
+  const [satelliteViewEnabled, setSatelliteViewEnabled] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [visibleOverlays, setVisibleOverlays] = useState(initialOverlayVisibility)
   const [exportSelection, setExportSelection] = useState(initialExportSelection)
@@ -156,7 +162,7 @@ export default function App() {
     const startedAt = performance.now()
     let outcome = "completed"
     setBusy(name)
-    setStatus({ message: "Working (May take up to 30 Seconds)", type: "loading" })
+    setStatus({ message: "Working; high-resolution terrain exports may take a few minutes.", type: "loading" })
     try {
       const count = await action(map, selection, controller.signal)
       onSuccess?.(count)
@@ -190,7 +196,7 @@ export default function App() {
       return
     }
 
-    const selectionKey = `${selection.longitude},${selection.latitude}`
+    const selectionKey = getSelectionKey(selection)
     if (loadedOverlaySelectionsRef.current[name] === selectionKey) {
       setMapOverlayVisibility(map, name, true)
       setVisibleOverlays((current) => ({ ...current, [name]: true }))
@@ -225,7 +231,7 @@ export default function App() {
     }
 
     await runAction("all-overlays", async (currentMap, currentSelection, signal) => {
-      const selectionKey = `${currentSelection.longitude},${currentSelection.latitude}`
+      const selectionKey = getSelectionKey(currentSelection)
       for (const { name, load } of visibleLayerControls) {
         signal.throwIfAborted()
         if (!visibleOverlays[name]) {
@@ -308,6 +314,7 @@ export default function App() {
         selection={selection}
         onSelectionChange={setSelection}
         searchedLocation={searchedLocation}
+        satelliteViewEnabled={satelliteViewEnabled}
       />
       {selectedParcel && (
         <div className="parcel-data-windows">
@@ -363,6 +370,16 @@ export default function App() {
           onClick={() => setMoreInfoOpen(true)}
         >
           PURPOSE +
+        </Button>
+        <Button
+          variant="outline"
+          className="satellite-view-toggle"
+          aria-pressed={satelliteViewEnabled}
+          disabled={!map}
+          onClick={() => setSatelliteViewEnabled((enabled) => !enabled)}
+        >
+          <Satellite aria-hidden="true" />
+          {satelliteViewEnabled ? "SATELLITE VIEW ON" : "SATELLITE VIEW OFF"}
         </Button>
         <Card>
           <CardHeader>
@@ -428,6 +445,8 @@ export default function App() {
             {howToUseOpen && (
               <ol className="export-steps" id="how-to-use-content">
                 <li>Move your area of interest by hovering over the selection box outline, then dragging it to the desired location.</li>
+                <li>Resize the area by dragging a handle on any side or corner of the selection box.</li>
+                <li>Use the Satellite View button under Purpose to toggle between the Jawg basemap and Esri imagery.</li>
                 <li>Use the list and eye icons to choose what to export and render on the map.</li>
                 <li>Select Export .OBJ to download the file for Blender.</li>
               </ol>
@@ -496,9 +515,9 @@ export default function App() {
 
             <h3>Export Selected Area</h3>
 
-            <Button variant="secondary" className="export-button w-full justify-start" disabled={!map || busy !== null || !Object.values(exportSelection).some(Boolean)} onClick={() => void runAction("obj", (currentMap, currentSelection, signal) => exportBuildingsObj(currentMap, currentSelection, signal, exportSelection), ({ buildingCount, treeCount, roadCount, parcelCount, terrainChunkCount, demTerrainVertexCount }) => `Exported OBJ with ${buildingCount} buildings, ${treeCount} trees, ${roadCount} road polylines, ${parcelCount} parcel boundaries, ${terrainChunkCount} terrain chunks, and ${demTerrainVertexCount.toLocaleString()} DEM Terrain vertices`)}>
+            <Button variant="secondary" className="export-button w-full justify-start" disabled={!map || busy !== null || !Object.values(exportSelection).some(Boolean)} onClick={() => void runAction("obj", (currentMap, currentSelection, signal) => exportBuildingsObj(currentMap, currentSelection, signal, exportSelection, satelliteViewEnabled), ({ buildingCount, treeCount, roadCount, parcelCount, terrainChunkCount, demTerrainVertexCount, terrainTexturesIncluded, activeTerrainTexture }) => `${terrainTexturesIncluded ? `Exported ZIP with ${activeTerrainTexture} active and both terrain textures included (extract the ZIP, then import the OBJ)` : "Exported OBJ ZIP"} with ${buildingCount} buildings, ${treeCount} trees, ${roadCount} road polylines, ${parcelCount} parcel boundaries, ${terrainChunkCount} terrain chunks, and ${demTerrainVertexCount.toLocaleString()} DEM Terrain vertices`)}>
               {busy === "obj" ? <LoaderCircle className="animate-spin" /> : <Download />}
-              .OBJ (BLENDER/SKP)
+              .OBJ ZIP (BLENDER/SKP)
             </Button>
             {busy === "obj" && (
               <Button

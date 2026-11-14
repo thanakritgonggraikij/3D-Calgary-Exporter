@@ -103,6 +103,53 @@
   pointer-events: stroke !important;
 }
 
+.selection-resize-marker {
+  border: 0;
+  background: transparent;
+}
+
+.selection-resize-marker.selection-resize-marker-locked {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.selection-resize-handle {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #000;
+  border-radius: 4px;
+  padding: 0;
+  background: #fff;
+  box-shadow: 0 1px 5px rgb(0 0 0 / 40%);
+  touch-action: none;
+}
+
+.selection-resize-handle:focus-visible {
+  outline: 2px solid #1f6b8f;
+  outline-offset: 2px;
+}
+
+.selection-resize-handle-n,
+.selection-resize-handle-s {
+  cursor: ns-resize;
+}
+
+.selection-resize-handle-e,
+.selection-resize-handle-w {
+  cursor: ew-resize;
+}
+
+.selection-resize-handle-ne,
+.selection-resize-handle-sw {
+  cursor: nesw-resize;
+}
+
+.selection-resize-handle-nw,
+.selection-resize-handle-se {
+  cursor: nwse-resize;
+}
+
 .selection-window.selection-window-locked {
   cursor: not-allowed;
 }
@@ -687,6 +734,18 @@
   white-space: nowrap;
 }
 
+.controls .satellite-view-toggle {
+  position: absolute;
+  top: 2.75rem;
+  right: calc(100% + 0.5rem);
+  white-space: nowrap;
+}
+
+.controls .satellite-view-toggle svg {
+  width: 1rem;
+  height: 1rem;
+}
+
 .purpose-dialog {
   position: fixed;
   inset: 0;
@@ -853,6 +912,13 @@
     top: auto;
     right: auto;
     bottom: calc(100% + 0.5rem);
+    left: 1rem;
+  }
+
+  .controls .satellite-view-toggle {
+    top: auto;
+    right: auto;
+    bottom: calc(100% + 3.5rem);
     left: 1rem;
   }
 
