@@ -1,3 +1,4 @@
+Commit
 # 3D-Calgary-Exporter
 STARTUP
 - npm run dev
