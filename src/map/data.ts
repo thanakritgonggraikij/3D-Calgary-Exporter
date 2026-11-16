@@ -8,7 +8,7 @@ import proj4 from "proj4"
 const treesApi = "https://data.calgary.ca/resource/tfs4-3wwa.json"
 const parcelsApi = "https://services1.arcgis.com/AVP60cs0Q9PEA8rH/ArcGIS/rest/services/Parcel_with_Roll_2026/FeatureServer/0/query"
 const roadsGeoJsonBaseUrl = "https://pub-a06088b43d4e4619a6b98a66771604cf.r2.dev/"
-const citywideBuildingsFlatGeobufUrl = "https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_citywide/Buildings_Calgary.fbg"
+const chunksBaseUrl = "https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_chunks/"
 const demChunksBaseUrl = "https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_chunks/"
 const citywideDEMCogUrl = "https://pub-858dd2138b2647f3b0639d97ff560e1e.r2.dev/DEM_citywide/DEM_Calgary_COG.tif"
 const jawgAccessToken = "g0AxIlVuwiLdCnTtl4xavfenRJWvV4Z9Mq29FsLOMlYZYjKa1Uwtxfu4TfzskiKN"
@@ -24,9 +24,6 @@ const jawgTileSize = 256
 proj4.defs("EPSG:3776", citywideDEMProjection)
 const wgs84ToCitywideDEM = proj4("EPSG:4326", "EPSG:3776")
 const citywideDEMToWgs84 = proj4("EPSG:3776", "EPSG:4326")
-const citywideBuildingsProjection = "+proj=tmerc +lat_0=0 +lon_0=-114 +k=0.9999 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs"
-const wgs84ToCitywideBuildings = proj4("EPSG:4326", citywideBuildingsProjection)
-const citywideBuildingsToWgs84 = proj4(citywideBuildingsProjection, "EPSG:4326")
 const demTerrainColorStops = [
   [0, 35, 83, 77],
   [0.36, 104, 145, 88],
@@ -98,7 +95,8 @@ type BuildingFeature = {
   geometry?: BuildingGeometry
   properties?: Record<string, unknown>
 }
-type BuildingCoordinateSystem = "wgs84" | "calgary3tm"
+type Chunk = { file: string; bounds: ViewBounds }
+type ChunksIndex = { chunks: Chunk[] }
 type TreeRecord = {
   ":id"?: string
   point?: { type?: string; coordinates?: [number, number] }
@@ -124,12 +122,12 @@ type ParcelFeatureCollection = FeatureCollection<ParcelGeometry>
 export type ParcelFeature = ParcelFeatureCollection["features"][number]
 type ParcelClickHandler = (feature: ParcelFeature) => void
 
+let chunksIndexPromise: Promise<ChunksIndex> | undefined
 let demChunksIndexPromise: Promise<DEMChunksIndex> | undefined
-let citywideBuildingsCoordinateSystemPromise: Promise<BuildingCoordinateSystem> | undefined
 let citywideDEMImagePromise: Promise<GeoTIFFImage> | undefined
 let citywideDEMRasterWindowKey: string | undefined
 let citywideDEMRasterWindowPromise: Promise<Float32Array> | undefined
-const buildingSelectionCache = new Map<string, Promise<BuildingFeature[]>>()
+const chunkCache = new Map<string, BuildingFeature[]>()
 const roadFileTextCache = new Map<string, Promise<string>>()
 const parcelClickHandlers = new WeakMap<LeafletMap, ParcelClickHandler>()
 const selectedParcelLayers = new WeakMap<LeafletMap, L.Path>()
@@ -196,10 +194,29 @@ function getIntersectingChunks<T extends { bounds: ViewBounds }>(chunks: T[], se
   return intersectingChunks
 }
 
+function getContainedChunks<T extends { bounds: ViewBounds }>(chunks: T[], selection: MapSelection): T[] {
+  const selectionBounds = getSelectionBounds(selection)
+  const containedChunks = chunks.filter((chunk) =>
+    chunk.bounds.west >= selectionBounds.west && chunk.bounds.east <= selectionBounds.east &&
+    chunk.bounds.south >= selectionBounds.south && chunk.bounds.north <= selectionBounds.north,
+  )
+
+  if (!containedChunks.length) throw new Error("The selected area is outside the available data coverage.")
+  return containedChunks
+}
+
 async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, { signal })
   if (!response.ok) throw new Error(`Request failed (${response.status}): ${url}`)
   return response.json() as Promise<T>
+}
+
+async function getChunksIndex(signal?: AbortSignal) {
+  chunksIndexPromise ??= fetchJson<ChunksIndex>(`${chunksBaseUrl}chunks_index.json`, signal).catch((error: unknown) => {
+    chunksIndexPromise = undefined
+    throw error
+  })
+  return chunksIndexPromise
 }
 
 async function getDEMChunksIndex(signal?: AbortSignal) {
@@ -210,115 +227,19 @@ async function getDEMChunksIndex(signal?: AbortSignal) {
   return demChunksIndexPromise
 }
 
-function getBuildingQueryRect(bounds: ViewBounds, coordinateSystem: BuildingCoordinateSystem) {
-  if (coordinateSystem === "wgs84") {
-    return {
-      minX: bounds.west,
-      minY: bounds.south,
-      maxX: bounds.east,
-      maxY: bounds.north,
-    }
-  }
-
-  const projectedCorners = [
-    wgs84ToCitywideBuildings.forward([bounds.west, bounds.south]),
-    wgs84ToCitywideBuildings.forward([bounds.west, bounds.north]),
-    wgs84ToCitywideBuildings.forward([bounds.east, bounds.south]),
-    wgs84ToCitywideBuildings.forward([bounds.east, bounds.north]),
-  ]
-  const eastings = projectedCorners.map(([easting]) => easting)
-  const northings = projectedCorners.map(([, northing]) => northing)
-  return {
-    minX: Math.min(...eastings),
-    minY: Math.min(...northings),
-    maxX: Math.max(...eastings),
-    maxY: Math.max(...northings),
-  }
-}
-
-async function getCitywideBuildingsCoordinateSystem() {
-  citywideBuildingsCoordinateSystemPromise ??= import("flatgeobuf/generic")
-    .then(({ readMetadata }) => readMetadata(citywideBuildingsFlatGeobufUrl))
-    .then(({ crs }) => {
-      const crsName = crs?.name?.toLowerCase()
-      if (crsName === "calgary_3tm_wgs_1984_w114") return "calgary3tm"
-      if (crs?.code === 4326 || crsName === "wgs 84") return "wgs84"
-      if (!crs || (!crs.code && !crs.name && !crs.wkt)) return "wgs84"
-      throw new Error(`Building data uses an unsupported coordinate system (${crs.name ?? crs.code ?? "unknown"}).`)
-    })
-    .catch((error: unknown) => {
-      citywideBuildingsCoordinateSystemPromise = undefined
-      throw error
-    })
-  return citywideBuildingsCoordinateSystemPromise
-}
-
-function transformBuildingFeatureToWgs84(feature: BuildingFeature): BuildingFeature {
-  const transformRing = (ring: Coordinate[]) => ring.map(([easting, northing, elevation]): Coordinate => {
-    const [longitude, latitude] = citywideBuildingsToWgs84.forward([easting, northing])
-    return elevation === undefined ? [longitude, latitude] : [longitude, latitude, elevation]
-  })
-  const geometry = feature.geometry
-  if (geometry?.type === "Polygon") {
-    return {
-      ...feature,
-      geometry: { ...geometry, coordinates: geometry.coordinates.map(transformRing) },
-    }
-  }
-  if (geometry?.type === "MultiPolygon") {
-    return {
-      ...feature,
-      geometry: { ...geometry, coordinates: geometry.coordinates.map((polygon) => polygon.map(transformRing)) },
-    }
-  }
-  return feature
-}
-
 async function loadDetailedFeatures(selection: MapSelection, signal?: AbortSignal) {
-  const bounds = getSelectionBounds(selection)
-  const selectionKey = `${bounds.west},${bounds.south},${bounds.east},${bounds.north}`
-  signal?.throwIfAborted()
-  const cached = buildingSelectionCache.get(selectionKey)
-  if (cached) return cached
-
-  const request = (async () => {
-    const coordinateSystem = await getCitywideBuildingsCoordinateSystem()
-    signal?.throwIfAborted()
-    try {
-      const features: BuildingFeature[] = []
-      const { deserialize } = await import("flatgeobuf/geojson")
-      const featureIterator = deserialize(citywideBuildingsFlatGeobufUrl, {
-        rect: getBuildingQueryRect(bounds, coordinateSystem),
-      })
-      for await (const feature of featureIterator) {
-        signal?.throwIfAborted()
-        if (feature.geometry?.type !== "Polygon" && feature.geometry?.type !== "MultiPolygon") continue
-        const buildingFeature = feature as BuildingFeature
-        features.push(coordinateSystem === "calgary3tm"
-          ? transformBuildingFeatureToWgs84(buildingFeature)
-          : buildingFeature)
-      }
-      signal?.throwIfAborted()
-      return features
-    } catch (error) {
-      if (signal?.aborted) throw error
-      throw new Error(
-        `Could not load indexed building data from ${citywideBuildingsFlatGeobufUrl}. Ensure the FlatGeobuf file has a spatial index and the Cloudflare bucket allows byte-range requests.`,
-        { cause: error },
-      )
+  const index = await getChunksIndex(signal)
+  const chunks = getContainedChunks(index.chunks, selection)
+  const featureLists = await Promise.all(chunks.map(async ({ file }) => {
+    let features = chunkCache.get(file)
+    if (!features) {
+      const chunk = await fetchJson<{ features: BuildingFeature[] }>(`${chunksBaseUrl}${file}`, signal)
+      features = chunk.features
+      chunkCache.set(file, features)
     }
-  })()
-  buildingSelectionCache.set(selectionKey, request)
-  void request.catch(() => {
-    if (buildingSelectionCache.get(selectionKey) === request) buildingSelectionCache.delete(selectionKey)
-  })
-  if (buildingSelectionCache.size > 3) {
-    const oldestSelection = buildingSelectionCache.keys().next().value
-    if (oldestSelection !== undefined && oldestSelection !== selectionKey) {
-      buildingSelectionCache.delete(oldestSelection)
-    }
-  }
-  return request
+    return features
+  }))
+  return featureLists.flat()
 }
 
 function parseDEMObj(file: string, bounds: ViewBounds, text: string, georeferenced: boolean, elevationOrigin: number): DEMMesh {
@@ -991,15 +912,15 @@ function getPolygonRings(feature: BuildingFeature): Coordinate[][][] {
 function getGroundAndFallbackRoof(feature: BuildingFeature, rings: Coordinate[][]) {
   const elevations = rings.flat().map((point) => point[2]).filter((value): value is number => Number.isFinite(value))
   const properties = feature.properties ?? {}
-  const groundProperty = Number.parseFloat(String(properties.GRD_ELEV_MIN_Z ?? properties.grd_elev_min_z ?? ""))
-  const roofProperty = Number.parseFloat(String(properties.ROOFTOP_ELEV_Z ?? properties.rooftop_elev_z ?? ""))
+  const groundProperty = Number.parseFloat(String(properties.GRD_ELEV_MIN_Z ?? ""))
+  const roofProperty = Number.parseFloat(String(properties.ROOFTOP_ELEV_Z ?? ""))
   const ground = elevations.length ? Math.min(...elevations) : Number.isFinite(groundProperty) ? groundProperty : 0
   const roof = elevations.length ? Math.max(...elevations) : Number.isFinite(roofProperty) ? roofProperty : ground + 10
   return { ground, fallbackRoof: Math.max(roof, ground + 3) }
 }
 
-export async function loadBuildingsInArea(map: LeafletMap, selection: MapSelection, signal?: AbortSignal) {
-  const features = await loadDetailedFeatures(selection, signal)
+export async function loadBuildingsInArea(map: LeafletMap, selection: MapSelection) {
+  const features = await loadDetailedFeatures(selection)
   const layer = getMapOverlays(map).buildings
   layer.clearLayers()
   let count = 0
@@ -1189,8 +1110,12 @@ function toLocalMeters(longitude: number, latitude: number, origin: [number, num
   const denominator = 1 - eccentricitySquared * sinLatitude * sinLatitude
   return {
     x: (longitude - origin[0]) * radians * radius * Math.cos(latitudeRadians),
-    z: (latitude - origin[1]) * radians * radius * (1 - eccentricitySquared) / Math.pow(denominator, 1.5),
+    z: -(latitude - origin[1]) * radians * radius * (1 - eccentricitySquared) / Math.pow(denominator, 1.5),
   }
+}
+
+function formatObjFace(indices: (number | string)[]) {
+  return `f ${[...indices].reverse().join(" ")}`
 }
 
 async function appendTreeCylinders(
@@ -1246,9 +1171,9 @@ async function appendTreeCylinders(
       const bottomNext = bottomRing + next
       const top = topRing + segment
       const topNext = topRing + next
-      lines.push(`f ${bottom} ${top} ${topNext} ${bottomNext}`)
-      lines.push(`f ${bottomCenter} ${bottom} ${bottomNext}`)
-      lines.push(`f ${topCenter} ${topNext} ${top}`)
+      lines.push(formatObjFace([bottom, top, topNext, bottomNext]))
+      lines.push(formatObjFace([bottomCenter, bottom, bottomNext]))
+      lines.push(formatObjFace([topCenter, topNext, top]))
     }
   }
 
@@ -1466,11 +1391,11 @@ async function appendDEMMeshes(
             const textureC = textureIndices ? textureIndices[cIndex] : textureA + columns
             const textureD = textureIndices ? textureIndices[dIndex] : textureC + 1
             const mappedTextureA = textureIndices ? textureIndices[aIndex] : textureA
-            lines.push(`f ${a}/${mappedTextureA} ${b}/${textureB} ${d}/${textureD}`)
-            lines.push(`f ${a}/${mappedTextureA} ${d}/${textureD} ${c}/${textureC}`)
+            lines.push(formatObjFace([`${a}/${mappedTextureA}`, `${b}/${textureB}`, `${d}/${textureD}`]))
+            lines.push(formatObjFace([`${a}/${mappedTextureA}`, `${d}/${textureD}`, `${c}/${textureC}`]))
           } else {
-            lines.push(`f ${a} ${b} ${d}`)
-            lines.push(`f ${a} ${d} ${c}`)
+            lines.push(formatObjFace([a, b, d]))
+            lines.push(formatObjFace([a, d, c]))
           }
           processedItems++
         }
@@ -1478,9 +1403,9 @@ async function appendDEMMeshes(
     } else {
       for (const face of mesh.faces) {
         if (processedItems > 0 && processedItems % 10000 === 0) await yieldToBrowser(signal)
-        lines.push(textureBounds
-          ? `f ${face.map((index) => `${firstMeshVertexIndex + index}/${firstMeshTextureIndex + index}`).join(" ")}`
-          : `f ${face.map((index) => firstMeshVertexIndex + index).join(" ")}`)
+        lines.push(formatObjFace(textureBounds
+          ? face.map((index) => `${firstMeshVertexIndex + index}/${firstMeshTextureIndex + index}`)
+          : face.map((index) => firstMeshVertexIndex + index)))
         processedItems++
       }
     }
@@ -1588,7 +1513,7 @@ async function saveObj(
   const fileBase = `calgary_context_${timestamp}`
   const lines = [
     "# Calgary 3D Context Export",
-    "# Coordinates are local metres: X=East, Y=Up, Z=North",
+    "# Coordinates are local metres: X=East, Y=Up, Z=South (latitude axis flipped for Blender)",
     `# Origin: ${origin[0].toFixed(6)}, ${origin[1].toFixed(6)}`,
     ...(terrainTextures ? [
       "# Jawg Terrain and Esri World Imagery textures",
@@ -1626,12 +1551,12 @@ async function saveObj(
         lines.push(`v ${local.x.toFixed(3)} ${(roof + verticalOffset).toFixed(3)} ${local.z.toFixed(3)}`)
       })
       for (let index = 1; index < points.length - 1; index++) {
-        lines.push(`f ${start} ${start + index} ${start + index + 1}`)
-        lines.push(`f ${start + points.length} ${start + points.length + index + 1} ${start + points.length + index}`)
+        lines.push(formatObjFace([start, start + index, start + index + 1]))
+        lines.push(formatObjFace([start + points.length, start + points.length + index + 1, start + points.length + index]))
       }
       for (let index = 0; index < points.length; index++) {
         const next = (index + 1) % points.length
-        lines.push(`f ${start + index} ${start + next} ${start + points.length + next} ${start + points.length + index}`)
+        lines.push(formatObjFace([start + index, start + next, start + points.length + next, start + points.length + index]))
       }
       vertexIndex += points.length * 2
     })
