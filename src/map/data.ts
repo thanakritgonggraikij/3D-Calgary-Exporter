@@ -1189,12 +1189,8 @@ function toLocalMeters(longitude: number, latitude: number, origin: [number, num
   const denominator = 1 - eccentricitySquared * sinLatitude * sinLatitude
   return {
     x: (longitude - origin[0]) * radians * radius * Math.cos(latitudeRadians),
-    z: -(latitude - origin[1]) * radians * radius * (1 - eccentricitySquared) / Math.pow(denominator, 1.5),
+    z: (latitude - origin[1]) * radians * radius * (1 - eccentricitySquared) / Math.pow(denominator, 1.5),
   }
-}
-
-function appendObjFace(lines: string[], vertices: (number | string)[]) {
-  lines.push(`f ${[...vertices].reverse().join(" ")}`)
 }
 
 async function appendTreeCylinders(
@@ -1232,13 +1228,13 @@ async function appendTreeCylinders(
     const bottomRing = vertexIndex
     for (let segment = 0; segment < treeCylinderSegments; segment++) {
       const angle = segment * angleStep
-      lines.push(`v ${(local.x + treeRadiusMeters * Math.cos(angle)).toFixed(3)} ${ground.toFixed(3)} ${(local.z - treeRadiusMeters * Math.sin(angle)).toFixed(3)}`)
+      lines.push(`v ${(local.x + treeRadiusMeters * Math.cos(angle)).toFixed(3)} ${ground.toFixed(3)} ${(local.z + treeRadiusMeters * Math.sin(angle)).toFixed(3)}`)
       vertexIndex++
     }
     const topRing = vertexIndex
     for (let segment = 0; segment < treeCylinderSegments; segment++) {
       const angle = segment * angleStep
-      lines.push(`v ${(local.x + treeRadiusMeters * Math.cos(angle)).toFixed(3)} ${(ground + treeHeightMeters).toFixed(3)} ${(local.z - treeRadiusMeters * Math.sin(angle)).toFixed(3)}`)
+      lines.push(`v ${(local.x + treeRadiusMeters * Math.cos(angle)).toFixed(3)} ${(ground + treeHeightMeters).toFixed(3)} ${(local.z + treeRadiusMeters * Math.sin(angle)).toFixed(3)}`)
       vertexIndex++
     }
     const topCenter = vertexIndex++
@@ -1250,9 +1246,9 @@ async function appendTreeCylinders(
       const bottomNext = bottomRing + next
       const top = topRing + segment
       const topNext = topRing + next
-      appendObjFace(lines, [bottom, top, topNext, bottomNext])
-      appendObjFace(lines, [bottomCenter, bottom, bottomNext])
-      appendObjFace(lines, [topCenter, topNext, top])
+      lines.push(`f ${bottom} ${top} ${topNext} ${bottomNext}`)
+      lines.push(`f ${bottomCenter} ${bottom} ${bottomNext}`)
+      lines.push(`f ${topCenter} ${topNext} ${top}`)
     }
   }
 
@@ -1470,11 +1466,11 @@ async function appendDEMMeshes(
             const textureC = textureIndices ? textureIndices[cIndex] : textureA + columns
             const textureD = textureIndices ? textureIndices[dIndex] : textureC + 1
             const mappedTextureA = textureIndices ? textureIndices[aIndex] : textureA
-            appendObjFace(lines, [`${a}/${mappedTextureA}`, `${b}/${textureB}`, `${d}/${textureD}`])
-            appendObjFace(lines, [`${a}/${mappedTextureA}`, `${d}/${textureD}`, `${c}/${textureC}`])
+            lines.push(`f ${a}/${mappedTextureA} ${b}/${textureB} ${d}/${textureD}`)
+            lines.push(`f ${a}/${mappedTextureA} ${d}/${textureD} ${c}/${textureC}`)
           } else {
-            appendObjFace(lines, [a, b, d])
-            appendObjFace(lines, [a, d, c])
+            lines.push(`f ${a} ${b} ${d}`)
+            lines.push(`f ${a} ${d} ${c}`)
           }
           processedItems++
         }
@@ -1592,7 +1588,7 @@ async function saveObj(
   const fileBase = `calgary_context_${timestamp}`
   const lines = [
     "# Calgary 3D Context Export",
-    "# Coordinates are local metres: X=East, Y=Up, Z=South (latitude flipped for Blender)",
+    "# Coordinates are local metres: X=East, Y=Up, Z=North",
     `# Origin: ${origin[0].toFixed(6)}, ${origin[1].toFixed(6)}`,
     ...(terrainTextures ? [
       "# Jawg Terrain and Esri World Imagery textures",
@@ -1630,12 +1626,12 @@ async function saveObj(
         lines.push(`v ${local.x.toFixed(3)} ${(roof + verticalOffset).toFixed(3)} ${local.z.toFixed(3)}`)
       })
       for (let index = 1; index < points.length - 1; index++) {
-        appendObjFace(lines, [start, start + index, start + index + 1])
-        appendObjFace(lines, [start + points.length, start + points.length + index + 1, start + points.length + index])
+        lines.push(`f ${start} ${start + index} ${start + index + 1}`)
+        lines.push(`f ${start + points.length} ${start + points.length + index + 1} ${start + points.length + index}`)
       }
       for (let index = 0; index < points.length; index++) {
         const next = (index + 1) % points.length
-        appendObjFace(lines, [start + index, start + next, start + points.length + next, start + points.length + index])
+        lines.push(`f ${start + index} ${start + next} ${start + points.length + next} ${start + points.length + index}`)
       }
       vertexIndex += points.length * 2
     })
