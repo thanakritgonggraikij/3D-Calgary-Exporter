@@ -10,7 +10,7 @@ STARTUP
 SOURCES
 Trees: City of Calgary Open Data Portal (https://data.calgary.ca/Environment/Public-Trees/tfs4-3wwa/about_data)
 
-Buildings: City of Calgary Open Data Portal (https://data.calgary.ca/Base-Maps/3D-Buildings-Citywide/cchr-krqg/about_data)
+Buildings: City of Calgary Open Data Portal (https://data.calgary.ca/Base-Maps/3D-Buildings-Citywide/cchr-krqg/about_data). The app queries the spatially indexed FlatGeobuf at `https://pub-a1585fe154d14fe38371cbf4741f9707.r2.dev/buildings_citywide/Buildings_Calgary.fbg`, fetching only features intersecting the selected area. It supports WGS 84 and Calgary 3TM (WGS 1984, W114) coordinates. The hosted file must include a spatial index and Cloudflare R2 CORS must allow byte-range requests from the deployed app. Convert the source GeoJSON with `ogr2ogr -f FlatGeobuf Buildings_Calgary.fbg Buildings_Calgary.geojson -lco SPATIAL_INDEX=YES` and upload it to that path.
 
 Terrain: City of Calgary Open Data Portal (https://data.calgary.ca/Base-Maps/Digital-Elevation-Model-DEM-ASCII-2m/eink-tu9p/about_data)
 

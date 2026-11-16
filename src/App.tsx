@@ -70,7 +70,12 @@ export default function App() {
   const [exportSelection, setExportSelection] = useState(initialExportSelection)
   const [status, setStatus] = useState<{ message: string; type: "success" | "error" | "loading" | "cancelled" } | null>(null)
   const [actionLog, setActionLog] = useState<string[]>([])
-  const [selection, setSelection] = useState<MapSelection>({ longitude: -114.0525, latitude: 51.0525 })
+  const [selection, setSelection] = useState<MapSelection>({
+    longitude: -114.0525,
+    latitude: 51.0525,
+    latitudeRadiusMeters: 250,
+    longitudeRadiusMeters: 250,
+  })
   const [selectedParcel, setSelectedParcel] = useState<ParcelFeature | null>(null)
   const [searchedLocation, setSearchedLocation] = useState<MapSelection | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
@@ -544,7 +549,7 @@ export default function App() {
             <p className="text-sm text-muted-foreground">
               <b>Trees: </b>City of Calgary Open Data Portal (https://data.calgary.ca/Environment/Public-Trees/tfs4-3wwa/about_data) <br />
               <br></br>
-              <b>Buildings: </b>City of Calgary Open Data Portal (https://data.calgary.ca/Base-Maps/3D-Buildings-Citywide/cchr-krqg/about_data) <br />
+              <b>Buildings: </b>City of Calgary Open Data Portal (https://data.calgary.ca/Base-Maps/3D-Buildings-Citywide/cchr-krqg/about_data); spatially indexed FlatGeobuf hosted on Cloudflare R2 <br />
               <br></br>
               <b>Terrain: </b>City of Calgary Open Data Portal (https://data.calgary.ca/Base-Maps/Digital-Elevation-Model-DEM-ASCII-2m/eink-tu9p/about_data) <br />
               <br></br>
@@ -585,7 +590,7 @@ export default function App() {
           <p>Existing 3D datasets for Calgary are limited only to fill-extrusions; meaning that roof, facade, and terrain geometries lack high definition details.
           </p>
           <p>
-            By hosting 3D LiDAR datasets then serving it in 800m x 800m geographic chunks, architectural design teams could extract high-fidelity 3D contexts such as buildings (LiDAR), digital elevation models (DEM, at detailed 2m resolutions), trees, etc. as standard Wavefront .OBJ format. Wavefront .OBJs can be directly edited in Blender and/or Sketchup during feasibility/schematic design phases and architectural visualizations.
+            By hosting 3D LiDAR datasets and serving only data intersecting the selected area, architectural design teams can extract high-fidelity 3D contexts such as buildings (LiDAR), digital elevation models (DEM, at detailed 2m resolutions), trees, etc. as standard Wavefront .OBJ format. Wavefront .OBJs can be directly edited in Blender and/or Sketchup during feasibility/schematic design phases and architectural visualizations.
           </p>
 
           <h3 id="purpose-goal-title">The Goal</h3>
