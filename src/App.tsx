@@ -70,7 +70,12 @@ export default function App() {
   const [exportSelection, setExportSelection] = useState(initialExportSelection)
   const [status, setStatus] = useState<{ message: string; type: "success" | "error" | "loading" | "cancelled" } | null>(null)
   const [actionLog, setActionLog] = useState<string[]>([])
-  const [selection, setSelection] = useState<MapSelection>({ longitude: -114.0525, latitude: 51.0525 })
+  const [selection, setSelection] = useState<MapSelection>({
+    longitude: -114.0525,
+    latitude: 51.0525,
+    latitudeRadiusMeters: 250,
+    longitudeRadiusMeters: 250,
+  })
   const [selectedParcel, setSelectedParcel] = useState<ParcelFeature | null>(null)
   const [searchedLocation, setSearchedLocation] = useState<MapSelection | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
